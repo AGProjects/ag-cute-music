@@ -12,7 +12,12 @@ Windows -> Run workflow), not on every patch. The build is in the GitHub reposit
 AG-CuteMusic-windows holds AG-CuteMusic-<version>-setup.exe and AG-CuteMusic-<version>-windows.zip.
 Each build is tried too: the self test plays a test song to its end through the app's Player (into a fakesink),
 then the Trial step installs the setup.exe silently, starts the app, takes a screenshot after 20 s and uninstalls it;
-the screenshot and the app's logs are the artifact AG-CuteMusic-windows-trial. A tag (a darcs
+the screenshot and the app's logs are the artifact AG-CuteMusic-windows-trial.
+
+Updates (cutemusic/updater.py): the installed app (not the zip) checks GitHub's latest release at start and once a
+day (or File -> Check for Updates...); a newer one's setup.exe is downloaded, checked against the sha256 GitHub gives
+for it, and run silently over the installation with /RELAUNCH=1 (installer.iss starts the app again). The release's
+notes are debian/changelog's entry of the version, so a manual run (no release) is never offered as an update. A tag (a darcs
 tag the sync turns into a git one) also makes a GitHub release with them.
 
 On a Windows machine (Python 3.10+ 64-bit from python.org, Inno Setup 6 for the installer):

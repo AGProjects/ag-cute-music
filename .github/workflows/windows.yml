@@ -102,9 +102,18 @@ jobs:
           $version = [regex]::Match((Get-Content cutemusic\__init__.py -Raw), "(?m)^__version__ = '(.*)'").Groups[1].Value
           $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$version" }
           $files = Get-ChildItem dist\AG-CuteMusic-*-setup.exe, dist\AG-CuteMusic-*-windows.zip | ForEach-Object FullName
+          # the notes: debian/changelog's entry of this version (its bullets: what the app's update dialog shows)
+          $entry = @(); $inside = $false
+          foreach ($line in Get-Content debian\changelog) {
+            if ($line -match "^\S+ \(([^)]+)\)") { if ($inside) { break }; $inside = $Matches[1] -eq $version; continue }
+            if ($inside -and $line -match '^ -- ') { break }
+            if ($inside -and $line.Trim()) { $entry += ($line -replace '^  \* ', '- ' -replace '^    ', '  ') }
+          }
+          $notes = ($entry -join "`n") + "`n`nThe installer (per user, no admin rights), or the zip: unpack it and run AG CuteMusic.exe."
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target $env:GITHUB_SHA --title "AG CuteMusic $version" --notes "AG CuteMusic $version for Windows: the installer (per user, no admin rights) or the zip (unpack and run AG CuteMusic.exe)."
+            gh release create $tag --target $env:GITHUB_SHA --title "AG CuteMusic $version" --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           gh release upload $tag @files --clobber

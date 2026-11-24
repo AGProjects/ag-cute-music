@@ -9,7 +9,8 @@ is imported. Else a PyQt6 installed by pip --user (~/Library/Python/3.x) comes f
 loaded next to the bundle's: a crash, or a symbol not found at the first PyQt6 module the bundle has and it lacks.
 
 AG_CUTEMUSIC_SELFTEST=1 (make-standalone.sh, which makes no image of an app failing it): GStreamer's version and the
-elements playing needs; every cutemusic module imported (each Qt module the app uses loaded, as at start); no
+elements playing needs; every cutemusic module imported (each Qt module the app uses loaded, as at start);
+cutemusic/selftest.py (a missing element gives None, the app's own audio sink, a test song played to its end); no
 library loaded from outside the bundle and the system; then exit, 0 when all is well.
 """
 
@@ -61,6 +62,13 @@ if os.environ.get('AG_CUTEMUSIC_SELFTEST'):
             failed.append(module)
             print(f'cannot import cutemusic.{module}:')
             traceback.print_exc()
+    checked, played = [], False
+    if not failed:
+        import tempfile
+        from cutemusic import selftest      # a missing element, the app's own sink, a test song played to its end
+        checked, played = selftest.check(tempfile.mkdtemp(prefix='cutemusic-selftest-'))
+        for line in checked:
+            print(line)
     import ctypes
     dyld = ctypes.CDLL(None)
     dyld._dyld_image_count.restype = ctypes.c_uint32
@@ -73,7 +81,7 @@ if os.environ.get('AG_CUTEMUSIC_SELFTEST'):
         print(f'loaded from outside the app: {image}')
     print(f'{len(images)} libraries loaded, {len(outside)} from outside the app; cutemusic modules not importable: '
           f'{", ".join(failed) or "none"}')
-    sys.exit(1 if missing or not decoders or failed or outside else 0)
+    sys.exit(1 if missing or not decoders or failed or outside or not played else 0)
 
 from cutemusic.app import main
 

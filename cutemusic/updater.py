@@ -1,4 +1,6 @@
-"""Updates of the standalone Mac app, as Sparkle does for Blink: an appcast next to the disk images
+"""Updates of the standalone apps: on macOS as Sparkle does for Blink (below); on Windows from GitHub's releases.
+
+macOS: an appcast next to the disk images
 (https://download.ag-projects.com/Cute/AGCuteMusicAppcast.xml, made by macos/make-appcast.py, uploaded by
 macos/upload.sh), checked at start and once a day (or File -> Check for Updates...).
 
@@ -14,9 +16,17 @@ macos/upload.sh), checked at start and once a day (or File -> Check for Updates.
   the running app moves while it runs.
 - Only the standalone app, Developer ID signed (macos/standalone.py sets AG_CUTEMUSIC_BUNDLE): not from a checkout,
   not an alias or ad hoc build.
+
+Windows (the app installed by its setup.exe: its uninstaller beside it; not the zip, not a checkout):
+- The latest release of github.com/AGProjects/ag-cute-music (made by .github/workflows/windows.yml at each new
+  version): its AG-CuteMusic-<version>-setup.exe, the release's text as the notes (Markdown).
+- Installed: the setup.exe downloaded and checked against the sha256 GitHub gives for it (the asset's digest), then
+  started detached, silently (its progress only), over this installation (/CURRENTUSER or /ALLUSERS as it is), with
+  /RELAUNCH=1 (windows/installer.iss starts the app when done), and we quit at once.
 """
 
 import hashlib
+import json
 import os
 import platform
 import plistlib
@@ -43,6 +53,9 @@ __all__ = ['Updater', 'supported', 'FEED_URL']
 
 
 FEED_URL = 'https://download.ag-projects.com/Cute/AGCuteMusicAppcast.xml'
+GITHUB_REPOSITORY = 'AGProjects/ag-cute-music'
+GITHUB_LATEST = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest'
+WINDOWS_SETUP = re.compile(r'^AG-CuteMusic-(.+)-setup\.exe$')
 CHECK_EVERY = 24 * 3600         # s
 FIRST_CHECK = 15                # s after start
 SPARKLE = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
@@ -53,6 +66,18 @@ def bundle():
     """This app's bundle (the standalone app), else None."""
     path = os.environ.get('AG_CUTEMUSIC_BUNDLE')
     return path if sys.platform == 'darwin' and path and os.path.isdir(path) else None
+
+
+def windows_installation():
+    """The folder of this app installed by its setup.exe (Windows), else None."""
+    if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
+        return None
+    folder = os.path.dirname(os.path.abspath(sys.executable))
+    return folder if os.path.exists(os.path.join(folder, 'unins000.exe')) else None
+
+
+def feed_url():
+    return GITHUB_LATEST if sys.platform == 'win32' else FEED_URL
 
 
 def _info(app):
@@ -76,6 +101,8 @@ _own_team = Ellipsis
 def supported():
     """Updates for this app: the standalone app, signed with a Developer ID."""
     global _own_team
+    if sys.platform == 'win32':
+        return windows_installation() is not None
     if bundle() is None:
         return False
     if _own_team is Ellipsis:
@@ -93,8 +120,23 @@ def _ssl_context():
 
 
 class Release:
-    def __init__(self, version, notes, url, sha256, length, minimum):
+    def __init__(self, version, notes, url, sha256, length, minimum, markdown=False):
         self.version, self.notes, self.url, self.sha256, self.length, self.minimum = version, notes, url, sha256, length, minimum
+        self.markdown = markdown        # notes in Markdown (GitHub's), else HTML (the appcast's)
+
+
+def _parse_github(data):
+    """GitHub's latest release with a setup.exe and its sha256, else None."""
+    release = json.loads(data)
+    prefix = f'https://github.com/{GITHUB_REPOSITORY}/releases/download/'
+    for asset in release.get('assets') or []:
+        match = WINDOWS_SETUP.match(asset.get('name') or '')
+        url = asset.get('browser_download_url') or ''
+        digest = asset.get('digest') or ''
+        if match and url.startswith(prefix) and digest.startswith('sha256:'):
+            return Release(match.group(1), release.get('body') or '', url, digest[7:].lower(), int(asset.get('size') or 0),
+                           '', markdown=True)
+    return None
 
 
 def _parse(data, arch):
@@ -161,6 +203,9 @@ class Updater(QObject):
         if not supported():
             if manual:
                 QMessageBox.information(self.window, 'Check for Updates',
+                                        f'Updates come with the AG CuteMusic installed by its setup.exe from '
+                                        f'github.com/{GITHUB_REPOSITORY}/releases: not for this one (the zip, or a '
+                                        f'checkout).' if sys.platform == 'win32' else
                                         'Updates come with the AG CuteMusic app from download.ag-projects.com '
                                         '(signed): not for this one (from a checkout, or built here).')
             return
@@ -175,13 +220,16 @@ class Updater(QObject):
             if time.time() - settings.value('updates/last_check', 0, type=float) < CHECK_EVERY:
                 return
         settings.setValue('updates/last_check', time.time())
+        if sys.platform == 'win32':
+            self._remove_old_downloads()
         self._busy = True
-        arch = str(_info(bundle()).get('AGCuteMusicBuild') or 'universal2')
+        windows = sys.platform == 'win32'
+        arch = None if windows else str(_info(bundle()).get('AGCuteMusicBuild') or 'universal2')
 
         def run():
             try:
-                with _fetch(FEED_URL) as response:
-                    release = _parse(response.read(), arch)
+                with _fetch(feed_url()) as response:
+                    release = _parse_github(response.read()) if windows else _parse(response.read(), arch)
                 self._checked.emit(release, '', manual)
             except Exception as e:
                 self._checked.emit(None, str(e), manual)
@@ -190,7 +238,7 @@ class Updater(QObject):
     def _on_checked(self, release, error, manual):
         self._busy = False
         if error:
-            log.warning(f'[updates] cannot read {FEED_URL}: {error}')
+            log.warning(f'[updates] cannot read {feed_url()}: {error}')
             if manual:
                 QMessageBox.warning(self.window, 'Check for Updates', f'Cannot check for updates: {error}')
             return
@@ -225,7 +273,10 @@ class Updater(QObject):
         layout.addWidget(QLabel(f'{APP_NAME} {release.version} is available: you have {__version__}. Install it now?'))
         notes = QTextBrowser()
         notes.setOpenExternalLinks(True)
-        notes.setHtml(release.notes or '<i>No release notes.</i>')
+        if release.markdown and release.notes:
+            notes.setMarkdown(release.notes)
+        else:
+            notes.setHtml(release.notes or '<i>No release notes.</i>')
         notes.setMinimumSize(460, 200)
         layout.addWidget(notes)
         self._bar = QProgressBar()
@@ -282,7 +333,38 @@ class Updater(QObject):
         self._bar.show()
         self._status.show()
         self._set_status('Downloading...')
-        threading.Thread(target=self._download_and_check, args=(release,), name='update-install', daemon=True).start()
+        target = self._download_windows if sys.platform == 'win32' else self._download_and_check
+        threading.Thread(target=target, args=(release,), name='update-install', daemon=True).start()
+
+    def _download(self, release, path, source):
+        """In a thread: release.url into path, its progress shown, checked against release.sha256."""
+        digest = hashlib.sha256()
+        with _fetch(release.url, timeout=60) as response, open(path, 'wb') as file:
+            total = int(response.headers.get('Content-Length') or release.length or 0)
+            done = last = 0
+            while True:
+                chunk = response.read(1 << 20)
+                if not chunk:
+                    break
+                file.write(chunk)
+                digest.update(chunk)
+                done += len(chunk)
+                if time.monotonic() - last > 0.1:
+                    last = time.monotonic()
+                    self._progress.emit(done, total)
+            self._progress.emit(done, total)
+        if digest.hexdigest() != release.sha256:
+            raise RuntimeError(f'the download does not match {source} (sha256): try again later')
+
+    def _download_windows(self, release):
+        """In a thread: the setup.exe downloaded and checked; left in its folder for _run_setup."""
+        work = tempfile.mkdtemp(prefix='ag-cute-music-update-')
+        setup = os.path.join(work, f'AG-CuteMusic-{release.version}-setup.exe')
+        try:
+            self._download(release, setup, 'GitHub\'s release')
+            self._installed.emit(setup, work, '')
+        except Exception as e:
+            self._installed.emit(None, work, str(e))
 
     def _download_and_check(self, release):
         """In a thread: the image downloaded and checked, its app checked and staged beside ours."""
@@ -291,23 +373,7 @@ class Updater(QObject):
         image = os.path.join(work, 'update.dmg')
         attached = False
         try:
-            digest = hashlib.sha256()
-            with _fetch(release.url, timeout=60) as response, open(image, 'wb') as file:
-                total = int(response.headers.get('Content-Length') or release.length or 0)
-                done = last = 0
-                while True:
-                    chunk = response.read(1 << 20)
-                    if not chunk:
-                        break
-                    file.write(chunk)
-                    digest.update(chunk)
-                    done += len(chunk)
-                    if time.monotonic() - last > 0.1:
-                        last = time.monotonic()
-                        self._progress.emit(done, total)
-                self._progress.emit(done, total)
-            if digest.hexdigest() != release.sha256:
-                raise RuntimeError('the download does not match the appcast (sha256): try again later')
+            self._download(release, image, 'the appcast')
             util.call_in_gui_thread(self._set_status, 'Checking the update...')
             os.mkdir(mount)
             subprocess.run(['hdiutil', 'attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount, image],
@@ -369,7 +435,47 @@ class Updater(QObject):
                 self._status.hide()
             return
         self._set_status('Installing: AG CuteMusic restarts...')
-        self._swap(staged, work)
+        if sys.platform == 'win32':
+            self._run_setup(staged)
+        else:
+            self._swap(staged, work)
+
+    def _run_setup(self, setup):
+        """Windows: the setup.exe started detached, silently, over this installation, and we quit at once: it waits
+        for our files (CloseApplications), installs, and starts the app again (/RELAUNCH=1, windows/installer.iss).
+        Its folder in %TEMP% stays (in use while it runs): older ones are removed at the next check."""
+        folder = windows_installation()
+        scope = '/CURRENTUSER' if os.path.normcase(folder).startswith(os.path.normcase(os.environ.get('LOCALAPPDATA', '?'))) else '/ALLUSERS'
+        clean = {name: value for name, value in os.environ.items()
+                 if not name.startswith(('GST_', 'GI_', 'GIO_', 'PYTHON', 'PYGI_')) and name != 'LD_LIBRARY_PATH'}
+        try:
+            subprocess.Popen([setup, '/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', scope,
+                              f'/DIR={folder}', '/RELAUNCH=1'], env=clean, close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        except OSError as e:
+            self._busy = False
+            log.warning(f'[updates] cannot start {setup}: {e}')
+            QMessageBox.warning(self.dialog or self.window, 'Software Update', f'The update was not installed: {e}')
+            if self.dialog is not None:
+                self.dialog.close()
+            return
+        log.info(f'[updates] {self._release.version}: {setup} started {scope} into {folder}, quitting')
+        if self.dialog is not None:
+            self.dialog.close()
+        self.window.close()
+        QTimer.singleShot(0, QApplication.instance().quit)
+
+    @staticmethod
+    def _remove_old_downloads():
+        """Windows: the folders of setup.exe files run before (in use then), a day old or more."""
+        for name in os.listdir(tempfile.gettempdir()):
+            path = os.path.join(tempfile.gettempdir(), name)
+            try:
+                if name.startswith('ag-cute-music-update-') and time.time() - os.path.getmtime(path) > 24 * 3600:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                pass
 
     def _swap(self, staged, work):
         """Once we have quit, a detached shell sets our app aside, moves the new one in, removes the old one and

@@ -25,46 +25,6 @@ if os.path.isdir(_gstreamer):
     gstreamer_libs.setup_python_environment()       # GST_PLUGIN_PATH, GI_TYPELIB_PATH, PYGI_DLL_DIRS, gi on sys.path
 
 
-
-def _selftest_play(Gst, folder):
-    """A song played to its end by the app's own Player (its playbin, audio filter, meters), into a fakesink (a build
-    machine has no sound card): a 3 s tone, encoded by the first encoder there of mp3, FLAC and WAV."""
-    import time
-    for encoder, extension in (('lamemp3enc', 'mp3'), ('flacenc', 'flac'), ('wavenc', 'wav')):
-        if Gst.ElementFactory.find(encoder) is not None:
-            break
-    else:
-        return 'play: no encoder for a test song'
-    song = os.path.join(folder, f'selftest-tone.{extension}')
-    maker = Gst.parse_launch(f'audiotestsrc num-buffers=130 freq=440 ! audioconvert ! audioresample ! {encoder} '
-                             f'! filesink location="{song.replace(os.sep, "/")}"')
-    maker.set_state(Gst.State.PLAYING)
-    message = maker.get_bus().timed_pop_filtered(30 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
-    maker.set_state(Gst.State.NULL)
-    if message is None or message.type == Gst.MessageType.ERROR or not os.path.getsize(song):
-        return f'play: the test song ({encoder}) not made'
-    from PyQt6.QtCore import QCoreApplication, QTimer
-    from cutemusic.player import Player
-    application = QCoreApplication.instance() or QCoreApplication([])
-    # the sink the app picks itself (each candidate of AUDIO_SINKS made in turn: one not there must not raise)
-    sink = Player().pipeline.get_property('audio-sink')
-    chosen = sink.get_factory().get_name() if sink is not None and sink.get_factory() else 'none'
-    os.environ['CUTEMUSIC_AUDIO_SINK'] = 'fakesink sync=false'
-    player = Player()
-    result = {}
-    player.started.connect(lambda uri: result.setdefault('started', True))
-    player.finished.connect(lambda: (result.setdefault('end', 'finished'), application.quit()))
-    player.error.connect(lambda error: (result.setdefault('end', f'error: {error}'), application.quit()))
-    QTimer.singleShot(30000, lambda: (result.setdefault('end', 'no end in 30 s'), application.quit()))
-    begun = time.monotonic()
-    player.play_file(song)
-    application.exec()
-    player.stop()
-    if result.get('end') == 'finished':
-        return f'played {extension} to its end in {time.monotonic() - begun:.1f} s (Player, fakesink; its own sink: {chosen})'
-    return f'play {extension}: {result.get("end")}' + ('' if result.get('started') else ', never started')
-
-
 _selftest = os.environ.get('AG_CUTEMUSIC_SELFTEST')
 if _selftest:
     lines, failed = [], True
@@ -85,9 +45,10 @@ if _selftest:
         import cutemusic.app      # every module the window needs imports on Windows
         import cutemusic.window
         lines.append('cutemusic: imports ok')
-        played = _selftest_play(Gst, os.path.dirname(os.path.abspath(_selftest)))
-        lines.append(played)
-        failed = bool(missing or not decoders or not played.startswith('played'))
+        from cutemusic import selftest     # a missing element, the app's own sink, a test song played to its end
+        checked, ok = selftest.check(os.path.dirname(os.path.abspath(_selftest)))
+        lines += checked
+        failed = bool(missing or not decoders or not ok)
     except Exception as e:
         import traceback
         lines.append(f'FAILED: {e}\n{traceback.format_exc()}')

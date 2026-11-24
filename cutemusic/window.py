@@ -517,6 +517,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(5000, self.negatives.resume)      # what was left queued at the last quit goes on
         if sys.platform == 'darwin':
             QTimer.singleShot(3000, self._offer_driver)      # the AG Podcast Mixer driver, once per version we carry
+        if sys.platform in ('darwin', 'win32'):
             from cutemusic.updater import Updater
             self.updater = Updater(self)        # newer versions of the app, checked at start and once a day
             self.updater.start()
@@ -1128,7 +1129,7 @@ class MainWindow(QMainWindow):
         self.web_view.serve_action = self.web_action
         self.web_libraries_action = menu.addAction('Web libraries...', lambda: self.web_view.show_info())
         menu.addSeparator()
-        if sys.platform == 'darwin':        # updates of the standalone app (updater.py): in the application menu
+        if sys.platform in ('darwin', 'win32'):     # updates of the standalone app (updater.py): on macOS in the application menu
             action = menu.addAction('Check for Updates...', lambda: self.updater.check(manual=True))
             action.setMenuRole(QAction.MenuRole.ApplicationSpecificRole)
         action = menu.addAction('Quit', self.close)
