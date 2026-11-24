@@ -1759,12 +1759,12 @@ class MixerView(AnalogFaces, QWidget):
         titles, details = QFontMetricsF(title_font), QFontMetricsF(detail_font)
         live = [call for call in self.blink_calls if not call[2]]
         first = (live or self.blink_calls or [None])[0]
-        # the header row: how the call goes (Calling..., Ringing..., In call, On hold); No call without one
+        # the header row: how the call goes (Calling..., Ringing..., In call, On hold); IDLE without one
         state = (first[4] or {}).get('state') if first is not None else None
         if first is None and self.auto_redial_at is not None:       # dropped: called again in a moment
             header = f'Redial in {max(0, math.ceil(self.auto_redial_at - time.monotonic()))} s'
         elif first is None:
-            header = 'No call'
+            header = 'IDLE'
         elif first[2]:
             header = 'On hold'
         elif state:
@@ -1934,7 +1934,8 @@ class MixerView(AnalogFaces, QWidget):
         LOSS_SHOWN_FROM, "No loss" then in its place (green). [] without quality (no line at all)."""
         if not quality:
             return []
-        rtt, loss_rx, loss_tx = quality
+        rtt, loss_rx, loss_tx = quality[:3]
+        concealed = quality[3] if len(quality) > 3 else 0.0
         def color(value, warn):
             return QColor('#ff0000') if value > warn else QColor('#3ddc84')
         parts = [(f'{rtt:.0f} ms', color(rtt, 150))] if round(rtt) > 0 else []
@@ -1942,8 +1943,10 @@ class MixerView(AnalogFaces, QWidget):
             parts.append((f'\u2193{loss_rx:.1f}%', color(loss_rx, 1)))
         if loss_tx >= LOSS_SHOWN_FROM:
             parts.append((f'\u2191{loss_tx:.1f}%', color(loss_tx, 1)))
-        if loss_rx < LOSS_SHOWN_FROM and loss_tx < LOSS_SHOWN_FROM:      # measured, and nothing lost: said so, next to the RTT
-            parts.append(('No loss', QColor('#3ddc84')))
+        if concealed >= LOSS_SHOWN_FROM:        # audio filled in (late or lost packets): the gaps heard, amber
+            parts.append((f'gaps {concealed:.1f}%', QColor('#ff0000') if concealed > 3 else QColor('#ffb347')))
+        if loss_rx < LOSS_SHOWN_FROM and loss_tx < LOSS_SHOWN_FROM and concealed < LOSS_SHOWN_FROM:
+            parts.append(('No loss', QColor('#3ddc84')))       # measured, and nothing lost: said so, next to the RTT
         return parts
 
     def _draw_quality(self, painter, rect, quality, size=None):

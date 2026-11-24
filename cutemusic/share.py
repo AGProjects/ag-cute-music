@@ -163,10 +163,12 @@ def calls_of(state, channel):
 
 
 def _quality(call):
-    """(rtt ms, loss received %, loss sent %) from a call's entry, None when Blink did not give them."""
+    """(rtt ms, loss received %, loss sent %, concealed %) from a call's entry, None when Blink did not give them.
+    concealed: what Blink filled in of what it received (packets late or lost: the gaps heard; a WebRTC room's)."""
     try:
         if 'rtt' not in call:
             return None
-        return (float(call['rtt']), float(call.get('loss_rx') or 0), float(call.get('loss_tx') or 0))
+        return (float(call['rtt']), float(call.get('loss_rx') or 0), float(call.get('loss_tx') or 0),
+                float(call.get('concealed') or 0))
     except (TypeError, ValueError):
         return None
