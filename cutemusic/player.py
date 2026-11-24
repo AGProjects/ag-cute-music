@@ -9,6 +9,7 @@ on the bus says it began.
 
 import os
 import re
+import sys
 import threading
 from collections import deque
 
@@ -27,6 +28,20 @@ except (ImportError, ValueError) as e:
     gst_error = str(e)
 
 if Gst is not None:
+    # gst-python's override of Gst.ElementFactory.make (in GStreamer's own wheels, the Windows app's) raises
+    # Gst.MissingPluginError for an element not there, where PyGObject's returns None: None everywhere, as this code
+    # (and link, mic, recorder, hal through this Gst) tests for
+    _missing = getattr(Gst, 'MissingPluginError', None) or getattr(sys.modules.get('gi.overrides.Gst'), 'MissingPluginError', None)
+    if _missing is not None:
+        _make = Gst.ElementFactory.make
+
+        def _make_or_none(factory_name, name=None, _make=_make, _missing=_missing):
+            try:
+                return _make(factory_name, name)
+            except _missing:
+                return None
+        Gst.ElementFactory.make = staticmethod(_make_or_none)
+
     # Device lists (Gst.DeviceMonitor, one per strip) from PulseAudio's provider (pipewire-pulse) only: PipeWire's
     # watches the PipeWire metadata from libpipewire's own thread and crashed AG CuteMusic there (a metadata event's
     # callback through a stale pointer, in libpipewire-module-metadata). PulseAudio's entries were the ones taken

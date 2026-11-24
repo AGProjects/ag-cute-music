@@ -43,10 +43,13 @@ def _selftest_play(Gst, folder):
     maker.set_state(Gst.State.NULL)
     if message is None or message.type == Gst.MessageType.ERROR or not os.path.getsize(song):
         return f'play: the test song ({encoder}) not made'
-    os.environ['CUTEMUSIC_AUDIO_SINK'] = 'fakesink sync=false'
     from PyQt6.QtCore import QCoreApplication, QTimer
     from cutemusic.player import Player
     application = QCoreApplication.instance() or QCoreApplication([])
+    # the sink the app picks itself (each candidate of AUDIO_SINKS made in turn: one not there must not raise)
+    sink = Player().pipeline.get_property('audio-sink')
+    chosen = sink.get_factory().get_name() if sink is not None and sink.get_factory() else 'none'
+    os.environ['CUTEMUSIC_AUDIO_SINK'] = 'fakesink sync=false'
     player = Player()
     result = {}
     player.started.connect(lambda uri: result.setdefault('started', True))
@@ -58,7 +61,7 @@ def _selftest_play(Gst, folder):
     application.exec()
     player.stop()
     if result.get('end') == 'finished':
-        return f'played {extension} to its end in {time.monotonic() - begun:.1f} s (Player, fakesink)'
+        return f'played {extension} to its end in {time.monotonic() - begun:.1f} s (Player, fakesink; its own sink: {chosen})'
     return f'play {extension}: {result.get("end")}' + ('' if result.get('started') else ', never started')
 
 

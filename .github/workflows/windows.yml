@@ -71,8 +71,10 @@ jobs:
           $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
           [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           $bitmap.Save("$out\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          # running is not enough: a Python exception leaves PyInstaller's "Unhandled exception in script" box up
           $alive = -not $app.HasExited
-          if ($alive) { Write-Host "running, window: '$((Get-Process -Id $app.Id).MainWindowTitle)'" } else { Write-Host "exited: $($app.ExitCode)" }
+          $title = if ($alive) { (Get-Process -Id $app.Id).MainWindowTitle } else { '' }
+          if ($alive) { Write-Host "running, window: '$title'" } else { Write-Host "exited: $($app.ExitCode)" }
           Copy-Item "$env:USERPROFILE\.ag-cute-music\*.log" $out -ErrorAction SilentlyContinue
           if ($alive) { Stop-Process -Id $app.Id -Force; Start-Sleep -Seconds 2 }
           $p = Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
@@ -80,6 +82,7 @@ jobs:
           if (Test-Path $exe) { throw 'uninstall left the app' }
           Write-Host 'uninstalled'
           if (-not $alive) { throw 'the app did not stay running (see the logs in AG-CuteMusic-windows-trial)' }
+          if ($title -notlike '*AG CuteMusic*') { throw "no AG CuteMusic window, the one up: '$title' (see screenshot.png)" }
 
       - uses: actions/upload-artifact@v5
         if: always()
