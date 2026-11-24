@@ -23,9 +23,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip
@@ -42,13 +42,52 @@ jobs:
           PYTHON: python
         run: windows\make-standalone.ps1
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: AG-CuteMusic-windows
           path: |
             dist/AG-CuteMusic-*-setup.exe
             dist/AG-CuteMusic-*-windows.zip
           if-no-files-found: error
+
+      # as a user would: the installer run (silently, per user), the app started from where it installed itself, a
+      # screenshot of its window after 20 s, its logs; then uninstalled. The screenshot and logs are the run's
+      # artifact AG-CuteMusic-windows-trial
+      - name: Trial
+        shell: pwsh
+        run: |
+          $out = New-Item -ItemType Directory -Force trial
+          $setup = (Get-ChildItem dist\AG-CuteMusic-*-setup.exe).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/LOG=$out\install.log" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "installer: exit $($p.ExitCode)" }
+          $dir = "$env:LOCALAPPDATA\Programs\AG CuteMusic"
+          $exe = "$dir\AG CuteMusic.exe"
+          if (-not (Test-Path $exe)) { throw "not installed: $exe" }
+          if (-not (Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'AG CuteMusic.lnk')) { throw 'no Start menu entry' }
+          Write-Host "installed: $exe"
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 20
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bitmap.Save("$out\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          $alive = -not $app.HasExited
+          if ($alive) { Write-Host "running, window: '$((Get-Process -Id $app.Id).MainWindowTitle)'" } else { Write-Host "exited: $($app.ExitCode)" }
+          Copy-Item "$env:USERPROFILE\.ag-cute-music\*.log" $out -ErrorAction SilentlyContinue
+          if ($alive) { Stop-Process -Id $app.Id -Force; Start-Sleep -Seconds 2 }
+          $p = Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -Wait
+          foreach ($i in 1..30) { if (-not (Test-Path $exe)) { break }; Start-Sleep -Seconds 1 }   # (it finishes in a copy of itself)
+          if (Test-Path $exe) { throw 'uninstall left the app' }
+          Write-Host 'uninstalled'
+          if (-not $alive) { throw 'the app did not stay running (see the logs in AG-CuteMusic-windows-trial)' }
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: AG-CuteMusic-windows-trial
+          path: trial/
+          if-no-files-found: ignore
 
       # a new version (the push that changed __version__) or a tag: a GitHub release with the installer and the zip;
       # by hand (Run workflow): the artifact only. The release of a version is v<version> on the commit built

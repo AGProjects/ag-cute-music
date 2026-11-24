@@ -14,7 +14,10 @@ Once (the workflow has to live in .github/workflows, recorded in darcs so the sy
 Then record and push as usual. A build runs only when the version changes (__version__ in cutemusic/__init__.py),
 on a tag, or by hand (Actions -> Windows -> Run workflow), not on every patch. The build is in the GitHub
 repository's Actions tab: its artifact
-AG-CuteMusic-windows holds AG-CuteMusic-<version>-setup.exe and AG-CuteMusic-<version>-windows.zip. A tag (a darcs
+AG-CuteMusic-windows holds AG-CuteMusic-<version>-setup.exe and AG-CuteMusic-<version>-windows.zip.
+Each build is tried too: the self test plays a test song to its end through the app's Player (into a fakesink),
+then the Trial step installs the setup.exe silently, starts the app, takes a screenshot after 20 s and uninstalls it;
+the screenshot and the app's logs are the artifact AG-CuteMusic-windows-trial. A tag (a darcs
 tag the sync turns into a git one) also makes a GitHub release with them.
 
 On a Windows machine (Python 3.10+ 64-bit from python.org, Inno Setup 6 for the installer):
