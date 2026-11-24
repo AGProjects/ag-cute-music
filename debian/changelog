@@ -1,3 +1,14 @@
+ag-cute-music (1.3.1) unstable; urgency=medium
+
+  * Added a USB position to the amplifier's output selector, a menu of them
+    (last used first) when more than one is plugged in
+  * Bigger output icons around the amplifier's output selector
+  * Detect audio inputs and outputs plugged in while running
+  * Restart a mic input that stalls or opens silent (USB mics)
+  * Fix a crash when an input left the mixer
+
+ -- AG Projects <support@ag-projects.com>  Tue, 24 Nov 2026 15:11:57 -0300
+
 ag-cute-music (1.3.0) unstable; urgency=medium
 
   * Bug fixes and windows builder

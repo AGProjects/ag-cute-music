@@ -26,6 +26,7 @@ PLUGINS = {
     'libav', 'flac', 'mpg123', 'vorbis', 'opus', 'wavpack',
     'audioconvert', 'audioresample', 'volume', 'level', 'spectrum', 'equalizer', 'audiofx', 'osxaudio',
     'audiomixer',       # the mixer's inputs on one output (cutemusic/mic.py _Output)
+    'audiotestsrc',     # the self test's tone (cutemusic/selftest.py), AG_CUTEMUSIC_MIC_TEST=source (mic.py)
 }
 TYPELIBS = {
     'GLib-2.0', 'GObject-2.0', 'GModule-2.0', 'GIRepository-2.0', 'Gst-1.0', 'GstBase-1.0', 'GstApp-1.0',
