@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=AG CuteMusic
+GenericName=Music Player
+Comment=Play the music folder, share it on the LAN, mix it into Blink calls
+Exec=ag-cute-music %F
+Icon=ag-cute-music
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;player;audio;mp3;flac;lyrics;
+MimeType=audio/mpeg;audio/flac;audio/x-flac;audio/ogg;audio/mp4;audio/x-m4a;audio/x-wav;
+StartupWMClass=ag-cute-music
+StartupNotify=true

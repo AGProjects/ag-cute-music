@@ -1,0 +1,13 @@
+# AG CuteMusic on Windows: what windows/make-standalone.ps1 installs into its build venv
+PyQt6>=6.9
+# tags, covers and lyrics of the music files
+mutagen
+# libraries on the LAN: found by Bonjour (cutemusic/sharing.py)
+zeroconf
+ifaddr
+# GStreamer, its plugins and its Python bindings (gi), from the GStreamer project's own wheels (1.28+); the
+# packages the app needs are copied next to its executable, not packed by PyInstaller
+gstreamer-bundle>=1.28
+# builds the app folder; Pillow makes the .ico from the SVG rendered by Qt
+pyinstaller>=6.10
+pillow

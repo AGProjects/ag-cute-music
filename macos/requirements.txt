@@ -1,0 +1,15 @@
+# AG CuteMusic requirements on macOS (installed by macos/install.sh into a venv that also sees
+# Homebrew's python packages, for gi: brew install gstreamer pygobject3).
+# PyQt6 6.12+ wheels need macOS 14; 6.11 (Qt 6.11) runs on 13 Ventura and later
+PyQt6>=6.9,<6.12
+# tags, covers and lyrics of the music files
+mutagen
+# libraries on the LAN: found by Bonjour (cutemusic/sharing.py)
+zeroconf
+# the media keys, also without the focus: macOS's Now Playing (cutemusic/nowplaying.py)
+pyobjc-framework-MediaPlayer
+# the microphone permission asked for (cutemusic/mic.py); the other apps' sound (cutemusic/taps.py: PyObjC's
+# Foundation and AppKit, which MediaPlayer brings)
+pyobjc-framework-AVFoundation
+# py2app builds the app bundle (macos/make-app.sh)
+py2app>=0.28

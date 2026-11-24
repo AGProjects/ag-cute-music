@@ -1,0 +1,175 @@
+AG CuteMusic
+============
+
+Copyright (C) 2026 AG Projects. License: GPL-3.0-or-later.
+
+Music player for a local music library, with:
+
+- Podcast mixer for Blink calls: mic, music and the call mixed
+- Streaming of libraries on the local network, or from a headless server
+- Library consolidation: compilations, years, artist names, missing albums
+
+PyQt6, GStreamer (python3-gi) and mutagen; Linux and macOS.
+
+  bin/ag-cute-music [<files or folders>]
+  bin/ag-cute-music --headless [--music <folder>] [--name <name>] [--port 47100] [--rescan <minutes>]
+
+
+Libraries on the LAN
+--------------------
+
+File -> Share my library on the LAN offers the music folder, read only, to the other AG CuteMusic on the LAN
+(HTTP on port 47100, announced by Bonjour with python3-zeroconf; else File -> Connect to a library... by
+address). The button left of the views lists the libraries found: one picked fills the tree and is browsed and
+played as the local one, each song fetched first (with its lyrics and images) into ~/.ag-cute-music/remote/.
+Right-click -> Copy to this computer brings songs, albums or artists into the music folder as
+<artist>/<album>/<file>; those already there are left. No password: for a trusted LAN.
+
+Headless (a NAS, a server): --headless shares the folder with no windows, read again every 60 minutes (only
+what changed). As a systemd user service: systemd/ag-cute-music-share.service. Needs python3-pyqt6 (QtCore),
+python3-mutagen and python3-zeroconf only.
+
+
+Organizer
+---------
+
+File -> Organize library... previews what it would change; only what is ticked is done, then the library is
+read again.
+
+- Compilations: an album spread over a folder per artist (as iTunes filed one without its compilation flag)
+  gathered in Compilations/<album>, optionally tagged as one (album artist "Various Artists").
+- Years: album folders renamed "YYYY - Album" from their tracks' year.
+- Unknown albums: songs without one looked up online (MusicBrainz, else the iTunes Store) by artist and title;
+  the album and year written in their tags, optionally moved into <artist>/<album>.
+- Artists: names that look like one artist written differently ("De Phazz", "de-phazz", "Krall Diana", all
+  lowercase) made one, in the tags, optionally their folders merged.
+- Duplicates: the same song in several files, shown only.
+
+Files are moved, never overwritten; .lrc/.txt and folder images go along, empty folders are removed. Every
+change is in ~/.ag-cute-music/organizer.log, each run's moves in organized-<time>.json (to undo by hand).
+
+
+Mixer and Blink
+---------------
+
+View -> Mixer (Ctrl+5): a small console. MIC: the input, echo, fader and meter; TO MONITOR hears it in the
+headset (off during a call, not to hear oneself). MUSIC: VOCAL CUT (the singer taken out, karaoke), TO CALLS (the
+music sent into Blink's call too, with the mic), its fader and meter. BLINK, only while Blink runs: who is in its
+call and what it plays, on our output with its own fader, never sent back into the call. POWER off: no device for
+Blink, no mic.
+
+In Blink, Devices -> AG Podcast Mixer, one device for input and output (Blink's echo cancelling off on it), always
+there: silent while the mixer is off (python3-sipsimple docs/PodcastMixerLink.md):
+
+- macOS: the AG Podcast Mixer driver, installed from AG CuteMusic's Play menu.
+- Linux: PipeWire nodes installed by the package (/usr/share/pipewire/pipewire.conf.d/ag-podcast-mixer.conf, read at
+  the next login): the mix played into ag_podcast_mixer_feed comes out of ag_podcast_mixer, Blink's microphone; Blink
+  plays the call into ag_podcast_mixer_call, the BLINK strip. Blink's SIP audio reaches them through the ALSA PCM
+  ag_cutemusic_mixer (alsa/60-ag-cute-music.conf, in /etc/alsa/conf.d), its WebRTC rooms by node name.
+
+Blink's calls on the BLINK strip, and its HANG UP and REDIAL, go over a control channel: the driver's properties on
+macOS, D-Bus on Linux (org.agprojects.PodcastMixer).
+
+Negatives (karaoke)
+-------------------
+
+A negative is a song without its singer, made offline by a neural separation model (BS-RoFormer, through
+audio-separator): far cleaner than the mixer's VOCAL CUT. Right-click songs, an album or an artist in the Library,
+or a playlist in Playlists -> Make negative: they are queued and made one at a time in the background (minutes a
+song on a CPU, much less on a GPU: NVIDIA's, or Apple Silicon's), the queue kept across restarts (the song being
+made when quitting starts over).
+
+The Negatives tab, after the Library and as it is, shows the negatives made, and the ones being made, queued or
+failed dimmed with their state (right-click: Remove from the queue, Try again, Stop, Start). Playing a negative
+shows the Lyrics view; playing a song that has a negative (or a negative), a button at the bottom left of the view
+(not on the Mixer) goes on with the other one from the same point. View -> Negatives (Ctrl+K) shows the tab.
+
+They are FLACs next to the music folder, in a folder of the same name and "-Negatives" (~/Music/Player:
+~/Music/Player-Negatives), at the songs' own paths, with their tags, cover and lyrics (the lyrics found online are
+the songs').
+
+The separator is installed on first use into ~/.ag-cute-music/separator (a venv of the system's python3:
+python3-venv; PyTorch and audio-separator, about 3 GB, the model 640 MB in ~/.ag-cute-music/separator-models).
+It reads and writes the songs with ffmpeg (apt install ffmpeg; on macOS brew install ffmpeg).
+
+File -> Web libraries... -> Enable serves a web page (port 47101) where others on the LAN send songs under a token
+of 5 digits, play them, and get their negatives once started here (the Web tab). All of it: doc/negatives.md.
+
+
+Docked
+------
+
+View -> Dock at the right (Ctrl+D): a frameless column on top, a fifth of the screen's width and its full
+height, with the cover, the VU meter, the lyrics and the transport; the main window hidden meanwhile. Esc, a
+double click or right-click -> Undock bring it back. Keys, media keys and the wheel (volume) work there too.
+Quit docked, it starts docked (on the screen under the mouse).
+
+View -> Full screen (Ctrl+F; Cmd+F on macOS): a kiosk, the visualizer and the play bar on the whole screen, no title bar, menu bar
+or library; the keys work as ever. Esc or Ctrl+F brings the window back as it was.
+
+
+Also
+----
+
+- Edit metadata (right-click a song, album or selection): year, artist, album, genre; "Multiple values" left
+  alone unless typed in.
+- Move to Trash (Delete): into <music folder>/.ag-cute-music-trash, in the same layout; File -> Empty Trash
+  deletes for good.
+- Amplifier view: meters (a lever: analog needles, circle or spectrum), volume (to 11: up to +6 dB past the top,
+  clipping included), bass, treble and balance (equalizer-3bands, audiopanorama), kept in the settings.
+- Lava lamp (a VU meter style): the wax heated, rising and sinking, faster with the music's loudness, swelling with its bass;
+  a click changes its colours.
+- Playlists: .m3u8 in ~/.ag-cute-music/playlists, plus those in the music folder; File -> Import playlists...
+  takes .m3u/.pls files or the Library.xml exported by iTunes / Music.
+- Resumes where it was left (queue, track, position), paused. Gapless.
+- Cover: the file's picture, else cover/folder/front.jpg next to it, else online. Lyrics: <file>.lrc/.txt,
+  else the tags, else online; synced ones follow the song.
+- Media keys without the focus: MPRIS on Linux (org.mpris.MediaPlayer2.agcutemusic, also playerctl).
+
+Not obvious keys: Ctrl+1..5 the views (cover, lyrics, VU meter, amplifier, mixer; the lava lamp is a VU meter style), Ctrl+Shift+1..4 by year, artist,
+album, folder, Ctrl+L the playing track in the tree, Ctrl+S the search field (Space plays and pauses while it is empty),
+Ctrl+Shift+S shuffle, Shift+Left/Right 10 s back/forward, F5 rescan. On macOS Ctrl is
+Cmd, except Control+Tab the next view and Cmd+Option+1..4 by year, artist, album, folder (Cmd+Shift+3..5 are the
+system's screenshots).
+
+
+Files
+-----
+
+  ~/.ag-cute-music/libraries/   the tags cache, one file per music folder (a rescan reads only what changed)
+  ~/.ag-cute-music/queue.json   the queue and the point in it;  history.json  the last 1000 plays
+  ~/.ag-cute-music/ui.conf      settings;  cutemusic.log, console.log  the logs
+  kill -USR2 <pid>              where every thread is, into console.log (a hang)
+
+Environment: CUTEMUSIC_AUDIO_SINK=<element [properties]> forces the output ("alsasink device=hw:1"); else the
+first that opens of osxaudiosink, pulsesink, pipewiresink, alsasink, autoaudiosink. A named output listed by
+both PipeWire and PulseAudio plays through pulsesink (pipewiresink deadlocks seeking while paused).
+On Wayland it runs through XWayland; CUTEMUSIC_WAYLAND=1 runs it natively.
+
+
+Dependencies
+------------
+
+Debian and Ubuntu packages: http://packages.ag-projects.com (apt install ag-cute-music).
+
+Debian/Ubuntu: python3-pyqt6 python3-gi python3-mutagen gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
+gstreamer1.0-plugins-base gstreamer1.0-plugins-good, gstreamer1.0-pulseaudio or gstreamer1.0-pipewire;
+gstreamer1.0-libav and gstreamer1.0-plugins-ugly for AAC/ALAC and the rest; python3-zeroconf for sharing.
+
+  ./makedeb.sh [distro] [rebuild|install]     dist/ag-cute-music_<version>_all.deb
+
+macOS: see macos/README (bash macos/install.sh makes the app).
+
+
+Copyright and license
+---------------------
+
+Copyright (C) 2026 AG Projects.
+
+AG CuteMusic is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+details: https://www.gnu.org/licenses/gpl-3.0.html

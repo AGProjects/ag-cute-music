@@ -1,0 +1,114 @@
+AG CuteMusic on macOS
+=====================
+
+Development: the app from this checkout
+---------------------------------------
+
+As AG CuteSync (macos/ there): a venv, py2app's alias mode, the app in ~/Applications.
+
+  brew install python gstreamer pygobject3
+  bash macos/install.sh
+
+install.sh makes a venv (~/work/ag-cutemusic-env) from Homebrew's python with --system-site-packages, so it sees
+Homebrew's gi (GStreamer), installs PyQt6, mutagen and py2app (macos/requirements.txt) into it, builds the app
+(macos/make-app.sh) into ~/Applications and adds an `ag-cute-music` command. Re-run it after moving this checkout.
+
+The alias bundle runs the cutemusic package of this checkout, so edits apply on the next launch; it does not run on
+another Mac (GStreamer and its plugins come from Homebrew, which py2app does not carry), and it does not update
+itself (updater.py: the standalone app only).
+
+To run without any app: bin/ag-cute-music, with a python that has PyQt6 and gi.
+
+
+The standalone app: to copy to other Macs
+-----------------------------------------
+
+Everything in the bundle: Python 3.10+ from python.org (its universal2 installer, not Homebrew's), PyQt6, and
+GStreamer from its own Python wheels (pip install gstreamer-bundle), no Homebrew.
+
+  macos/make-standalone.sh              (default, --universal) arm64 + x86_64: runs natively on both; Qt's two
+                                        wheels merged with delocate-merge
+  macos/make-standalone.sh --intel      x86_64 only, built under Rosetta (rarely needed: Intel Macs run the
+                                        universal app)
+
+It builds in its own venv (build/standalone-<mode>-env, log build/py2app-<mode>.log), trims GStreamer and Qt to what
+the app uses (prune_app.py), builds the AG Podcast Mixer driver into it (below), checks every binary has the
+architectures needed, then:
+
+- signs it: Developer ID, hardened runtime (sign-app.sh: each binary, the frameworks, the driver, the app; signatures
+  cached in build/sign-cache); ad hoc when there is no Developer ID Application certificate, or SIGN_IDENTITY=-
+- self test (AG_CUTEMUSIC_SELFTEST=1, standalone.py): GStreamer and the elements playing needs, every cutemusic
+  module imported, no library loaded from outside the app. An app failing it is not packaged: the script stops
+  (exit 1), with no image nor zip, and removes those of an earlier build
+- signed with Developer ID: the disk image dist/AG-CuteMusic.dmg (make-dmg.sh, needs create-dmg from MacPorts),
+  notarized (notarize-app.sh, keychain profile NOTARY_PROFILE, default notarytool-password; - to skip), its ticket
+  stapled to the image and the app, dist/AG-CuteMusic.zip, and the image opened (NO_OPEN=1: not)
+
+The app is dist/<mode>/AG CuteMusic.app (mode universal or intel; the Intel image and zip are named -intel). Ad hoc
+signed or not notarized, on the other Mac: xattr -dr com.apple.quarantine "/Applications/AG CuteMusic.app".
+
+standalone.py, the bundle's start script, uses only the Python packages inside the bundle (a PyQt6 installed with
+pip --user would otherwise be loaded next to the bundle's own Qt).
+
+
+Releasing and updates
+---------------------
+
+  macos/release.sh [<version>]
+
+1. raises __version__ in cutemusic/__init__.py (default: its last number + 1; pushed, it also starts the Windows
+   build on GitHub)
+2. adds a debian/changelog entry, "Bug fixes", and opens it in $VISUAL / $EDITOR (else TextEdit) to be edited: its
+   bullets are the release notes the update dialog shows; asks before building
+3. make-standalone.sh (universal)
+4. make-appcast.py: dist/AGCuteMusicAppcast.xml (Sparkle's format: the version, its notes, each image with its
+   length and sha256), shown; asks before upload.sh
+
+Run again after a failed build or an upload not done: while __version__ is not the live appcast's version yet, it is
+kept with its changelog entry (no second bump).
+
+  macos/upload.sh
+
+Uploads a release over ssh (rsync) to download:/var/www/download/Cute/ (UPLOAD_TO=<host:folder>), served as
+https://download.ag-projects.com/Cute/: the image(s), notarized, their zips, then the appcast, last, after checking
+the built app is __version__.
+
+The standalone app, Developer ID signed, reads https://download.ag-projects.com/Cute/AGCuteMusicAppcast.xml at start
+and once a day ("Check for updates automatically", in the update dialog) and from AG CuteMusic -> Check for
+Updates...; a newer version is offered with its notes (Install Update, Skip This Version, Remind Me Later).
+Installed: the image downloaded and checked against its sha256, its app checked (same bundle id, the version
+announced, codesign --verify --deep --strict, the same Developer ID team, notarized), copied beside the app; the app
+quits, the new one is swapped in (the administrator's password only when its folder is not writable) and started.
+An Intel image has its own entry, taken by the Intel app (AGCuteMusicBuild in its Info.plist), only when built and
+uploaded.
+
+
+The AG Podcast Mixer driver
+---------------------------
+
+macos/driver/ (python3-sipsimple docs/PodcastMixerLink.md, v2): a CoreAudio driver (AudioServerPlugIn, libASPL
+vendored in macos/driver/libASPL) whose "AG Podcast Mixer" input is the mixer's mix, Blink's microphone (Blink Pro's
+too); the mixer plays into its hidden "AG Podcast Mixer Feed" output. Needs cmake (brew install cmake).
+
+  macos/driver/build.sh [--trace] [--sign]   build/driver/AGPodcastMixer.driver, arm64 + x86_64, macOS 13+
+  sudo macos/driver/install.sh [-u]          into /Library/Audio/Plug-Ins/HAL (or removed), coreaudiod restarted
+
+make-standalone.sh builds it into the app (Contents/Resources). The app installs, updates or removes it from
+Play -> ... AG Podcast Mixer driver... (the administrator's password; the sound stops a moment while coreaudiod
+restarts) and offers the install or update at start, once per driver version (DRIVER_VERSION in
+macos/driver/CMakeLists.txt: raise it with every change to the driver).
+
+
+Files
+-----
+
+  install.sh, make-app.sh, ag-cute-music.py  the development app (alias mode) and its start script
+  setup.py, requirements.txt                 py2app's recipe (both apps), the venv's packages
+  make-standalone.sh, standalone.py          the standalone app, its start script and self test
+  prune_app.py                               GStreamer plugins and Qt modules trimmed to what the app uses
+  sign-app.sh, entitlements.plist            Developer ID signing, hardened runtime
+  notarize-app.sh                            notarization and stapling
+  make-dmg.sh, dmg-background.png            the drag-to-Applications disk image
+  release.sh, make-appcast.py, upload.sh     a release: version, changelog, build, appcast, upload
+  driver/                                    the AG Podcast Mixer driver
+  make_icns.py                               the .icns: the VU meters (cutemusic/appicon.py; or an SVG)

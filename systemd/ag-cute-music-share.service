@@ -1,0 +1,27 @@
+# AG CuteMusic, headless: the music folder shared on the LAN (no windows, no display), for a NAS or a server.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/ag-cute-music-share.service ~/.config/systemd/user/
+#   (edit ExecStart: where the repository is, --music <folder>, --name <name>)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ag-cute-music-share
+#   sudo loginctl enable-linger $USER      # runs without being logged in, and from boot
+#
+#   journalctl --user -u ag-cute-music-share -f      # its log (also ~/.ag-cute-music/cutemusic.log)
+#
+# Needs python3-pyqt6 (QtCore only), python3-mutagen and, to be found without typing its address,
+# python3-zeroconf. Port 47100 (TCP) open to the LAN, and mDNS (UDP 5353).
+
+[Unit]
+Description=AG CuteMusic library shared on the LAN (headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/work/ag-cute-music/bin/ag-cute-music --headless --music %h/Music
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

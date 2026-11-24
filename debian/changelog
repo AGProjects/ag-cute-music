@@ -1,0 +1,107 @@
+ag-cute-music (1.2.1) unstable; urgency=medium
+
+  * Added analog needle VU meters to the mixer, calibrated as the amplifier's
+  * Added left and right channel mute to the Local Library strip
+  * Moved the MUTE buttons under the faders
+  * Show each participant's left and right levels for stereo rooms
+  * Amplifier VOLUME no longer moves the VU meters
+  * MUTE empties the strip's meter at once
+  * Fix high CPU use with the needle meters
+
+ -- AG Projects <support@ag-projects.com>  Sun, 22 Nov 2026 10:21:00 -0300
+
+ag-cute-music (1.2.0) unstable; urgency=medium
+
+  * UI improvements
+
+ -- AG Projects <support@ag-projects.com>  Sat, 21 Nov 2026 18:57:02 -0300
+
+ag-cute-music (1.1.10) unstable; urgency=medium
+
+  * UI improvements
+
+ -- AG Projects <support@ag-projects.com>  Fri, 20 Nov 2026 20:56:04 -0300
+
+ag-cute-music (1.1.9) unstable; urgency=medium
+
+  * UI improvements
+
+ -- AG Projects <support@ag-projects.com>  Fri, 20 Nov 2026 14:38:52 -0300
+
+ag-cute-music (1.1.8) unstable; urgency=medium
+
+  * More and smarter mixer controls
+  * Bug fixes
+
+ -- AG Projects <support@ag-projects.com>  Fri, 20 Nov 2026 12:06:24 -0300
+
+ag-cute-music (1.1.7) unstable; urgency=medium
+
+  * Bug fixes
+
+ -- AG Projects <support@ag-projects.com>  Wed, 18 Nov 2026 18:47:40 -0300
+
+ag-cute-music (1.1.6) unstable; urgency=medium
+
+  * Bug fixes
+
+ -- AG Projects <support@ag-projects.com>  Wed, 18 Nov 2026 08:23:21 -0300
+
+ag-cute-music (1.1.5) unstable; urgency=medium
+
+  * Added more mixer slots
+  * Added streaming device
+  * Improve navigation
+  * Bug fixes
+
+ -- AG Projects <support@ag-projects.com>  Wed, 18 Nov 2026 07:54:39 -0300
+
+ag-cute-music (1.1.4) unstable; urgency=medium
+
+  * Added microphone permission dialog
+
+ -- AG Projects <support@ag-projects.com>  Tue, 17 Nov 2026 14:19:56 -0300
+
+ag-cute-music (1.1.3) unstable; urgency=medium
+
+  * Added MacOSX entitlements for audio input
+
+ -- AG Projects <support@ag-projects.com>  Tue, 17 Nov 2026 13:09:29 -0300
+
+ag-cute-music (1.1.2) unstable; urgency=medium
+
+  * Added OS audio driver and support for external audio apps
+  * Added auto updater
+  * Added karaoke settings
+
+ -- AG Projects <support@ag-projects.com>  Tue, 17 Nov 2026 12:27:02 -0300
+
+ag-cute-music (1.1.1) unstable; urgency=medium
+
+  * Bug fixes and improvements
+
+ -- Adrian Georgescu <ag@ag-projects.com>  Tue, 17 Nov 2026 09:10:35 -0300
+
+ag-cute-music (1.1.0) unstable; urgency=medium
+
+  * Added Blink Podcast integration
+
+ -- AG Projects <support@ag-projects.com>  Sat, 14 Nov 2026 16:46:00 -0300
+
+ag-cute-music (1.0.0) unstable; urgency=medium
+
+  * Edit metadata (year, artist, album, genre) of a song, an album or a
+    selection, from the library's context menu.
+  * Move to Trash (Delete key, context menu) and File -> Empty Trash.
+  * The Amplifier view: VU meters, volume (up to 11), bass, treble and
+    balance knobs.
+  * The tags cache kept per music folder.
+
+ -- AG Projects <support@ag-projects.com>  Fri, 13 Nov 2026 13:42:00 -0300
+
+ag-cute-music (0.1.0) unstable; urgency=medium
+
+  * Initial release: the music folder in a tree by genre, year or artist,
+    a play queue, and a pane with the cover, the lyrics and a VU meter.
+
+ -- AG Projects <support@ag-projects.com>  Thu, 12 Nov 2026 15:00:00 -0300

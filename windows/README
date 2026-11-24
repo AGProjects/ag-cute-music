@@ -1,0 +1,36 @@
+AG CuteMusic on Windows
+=======================
+
+Built on GitHub's Windows runner (.github/workflows/windows.yml) from the AG Projects darcs repository synced to
+GitHub: Python, PyQt6 and GStreamer (the GStreamer project's own Python wheels, 1.28+:
+gstreamer-bundle) packed into one folder by PyInstaller, a zip of it and an installer (Inno Setup, per user, no
+admin rights).
+
+Once (the workflow has to live in .github/workflows, recorded in darcs so the sync carries it):
+
+  mkdir -p .github && cp -r github/. .github/       (github/: the working copy; after each change to it too)
+  darcs add -r windows .github
+
+Then record and push as usual. A build runs only when the version changes (__version__ in cutemusic/__init__.py),
+on a tag, or by hand (Actions -> Windows -> Run workflow), not on every patch. The build is in the GitHub
+repository's Actions tab: its artifact
+AG-CuteMusic-windows holds AG-CuteMusic-<version>-setup.exe and AG-CuteMusic-<version>-windows.zip. A tag (a darcs
+tag the sync turns into a git one) also makes a GitHub release with them.
+
+On a Windows machine (Python 3.10+ 64-bit from python.org, Inno Setup 6 for the installer):
+
+  powershell -ExecutionPolicy Bypass -File windows\make-standalone.ps1
+
+The files:
+
+  make-standalone.ps1   the build: venv, PyInstaller, GStreamer next to the executable, self test, zip, installer
+  ag-cute-music.spec    PyInstaller's: the app folder, without GStreamer (copied in as it is)
+  standalone.py         the executable's script: GStreamer's environment set up before gi is imported;
+                        AG_CUTEMUSIC_SELFTEST=<file>: GStreamer, its elements and every module checked, then exit
+  installer.iss         Inno Setup's
+  make_ico.py           icons/ag-cute-music.svg into the .ico
+  requirements.txt      what the build venv gets
+
+Not on Windows: the mixer as a sound device for Blink (the AG Podcast Mixer link, link.py: a driver on macOS,
+PipeWire nodes on Linux); the media keys work while the window has the focus (no MPRIS, no Now Playing). Settings and
+logs are in %USERPROFILE%\.ag-cute-music.

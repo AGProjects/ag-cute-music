@@ -1,0 +1,39 @@
+Source: ag-cute-music
+Section: sound
+Priority: optional
+Maintainer: AG Projects <support@ag-projects.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://ag-projects.com
+Rules-Requires-Root: no
+
+Package: ag-cute-music
+Architecture: all
+Depends: ${misc:Depends},
+         python3 (>= 3.10),
+         python3-pyqt6,
+         python3-gi,
+         python3-mutagen,
+         gir1.2-gstreamer-1.0,
+         gir1.2-gst-plugins-base-1.0,
+         gstreamer1.0-plugins-base,
+         gstreamer1.0-plugins-good
+Recommends: python3-zeroconf,
+            python3-ifaddr,
+            gstreamer1.0-libav,
+            gstreamer1.0-plugins-ugly,
+            gstreamer1.0-pipewire,
+            gstreamer1.0-pulseaudio,
+            pulseaudio-utils,
+            pipewire-alsa,
+            qt6-svg-plugins,
+            qt6-qpa-plugins,
+            libxcb-cursor0,
+            python3-venv,
+            ffmpeg
+Description: Music player with LAN streaming and a podcast mixer for Blink
+ Music player for a local music library, with:
+  - Podcast mixer for Blink calls: mic, music and the call mixed
+  - Streaming of libraries on the local network, or from a headless server
+  - Library consolidation: compilations, years, artist names, missing albums
+  - Negatives for karaoke: songs without their singer, made offline (BS-RoFormer)

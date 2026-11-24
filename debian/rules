@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+PKG := debian/ag-cute-music
+SHARE := $(PKG)/usr/share/ag-cute-music
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	# the application, run from /usr/share/ag-cute-music (bin/ag-cute-music puts it on the path)
+	for file in cutemusic/*.py; do install -D -m 644 $$file $(SHARE)/$$file; done
+	# shootback's slaver: the web page's public port (cutemusic/tunnel.py)
+	for file in shootback/*.py; do install -D -m 644 $$file $(SHARE)/$$file; done
+	install -D -m 755 bin/ag-cute-music $(SHARE)/bin/ag-cute-music
+	install -D -m 644 icons/ag-cute-music.svg $(SHARE)/icons/ag-cute-music.svg
+	install -D -m 755 debian/ag-cute-music.sh $(PKG)/usr/bin/ag-cute-music
+	# the desktop entry and its icon
+	install -D -m 644 ag-cute-music.desktop $(PKG)/usr/share/applications/ag-cute-music.desktop
+	install -D -m 644 icons/ag-cute-music.svg $(PKG)/usr/share/icons/hicolor/scalable/apps/ag-cute-music.svg
+	install -D -m 644 README $(PKG)/usr/share/doc/ag-cute-music/README
+	# the mixer as one ALSA device, for Blink (cutemusic/share.py)
+	install -D -m 644 alsa/60-ag-cute-music.conf $(PKG)/etc/alsa/conf.d/60-ag-cute-music.conf
+	# the mixer's PipeWire nodes, always there (v2: Blink's microphone and the call)
+	install -D -m 644 pipewire/ag-podcast-mixer.conf $(PKG)/usr/share/pipewire/pipewire.conf.d/ag-podcast-mixer.conf
