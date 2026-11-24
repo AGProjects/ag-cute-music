@@ -11,6 +11,7 @@ state changes while live (as pipewiresink on a seek, player.py).
 import json
 import os
 import sys
+import time
 
 from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal
 
@@ -33,6 +34,12 @@ LATENCY = int(os.environ.get('AG_CUTEMUSIC_MIC_LATENCY') or LATENCY)
 # Taken as mono once seen (opened with one channel, so it is on both sides from there on), and remembered per device.
 MONO_SIGNAL = -50.0         # dB: the left carries sound
 MONO_SILENCE = -80.0        # dB: the right has none
+# An input that stalls: a USB mic now and then opened silent (no buffers at all, or digital zeros), until chosen again
+# (another input and back). Made anew by the watchdog instead, a few times at most, until sound comes again.
+STALL_AFTER = 2.0           # s without a buffer (no level message): stalled
+DEAD_AFTER = 4.0            # s of digital zero (no hardware's noise floor): opened dead
+DEAD_SILENCE = -200.0       # dB: digital zero (level's -inf, or NaN)
+STALL_RETRIES = 3           # made anew this many times, then left as it is (a muted mic, a switched-off one)
 MONO_AFTER = 40             # level messages in a row (25 ms: 1 s) that say so
 
 
@@ -105,20 +112,20 @@ class Mic(QObject):
         self.echo = 0.0             # 0..1
         self.pipeline = None
         self._output = None         # macOS: the _Output its chain (a bin, self.pipeline) plays in
-        self._monitor = None
         self._volume = self._echo = None
         self._timer = QTimer(self, interval=25)
         self._timer.timeout.connect(self._poll)
+        self._watchdog = QTimer(self, interval=500)
+        self._watchdog.timeout.connect(self._watch)
+        self._stalls = 0            # made anew by the watchdog since sound last came (or the input was chosen)
+        self._last_level = self._dead_since = None
 
     @property
     def available(self):
         return Gst is not None and not os.environ.get('CUTEMUSIC_AUDIO_SINK')
 
     def forget_devices(self):
-        """The inputs listed again from scratch at the next input_devices() (after the microphone permission)."""
-        if self._monitor is not None:
-            self._monitor.stop()
-            self._monitor = None
+        """(Nothing kept now: input_devices() probes afresh each time.)"""
 
     def input_kinds(self):
         """{input device name: 'laptop' (built in), 'headset' (Bluetooth, a headset), 'wave' (virtual: an avatar of its
@@ -144,13 +151,12 @@ class Mic(QObject):
         """{name: Gst.Device} of the audio inputs (not the outputs' monitors), PulseAudio's taken over PipeWire's."""
         if Gst is None:
             return {}
-        if self._monitor is None:
-            self._monitor = Gst.DeviceMonitor.new()
-            self._monitor.add_filter('Audio/Source', None)
-            if not self._monitor.start():
-                log.warning('[mic] cannot list the audio inputs')
+        # a fresh probe each time: a started monitor kept only what was there when it started on macOS (Core Audio's
+        # provider watches no hot plugging), a mic plugged in since never listed (nor after the microphone permission)
+        monitor = Gst.DeviceMonitor.new()
+        monitor.add_filter('Audio/Source', None)
         devices = {}
-        found = self._monitor.get_devices() or []
+        found = monitor.get_devices() or []
         for device in found:
             name = device.get_display_name()
             properties = device.get_properties()
@@ -169,6 +175,7 @@ class Mic(QObject):
         """Sing into the input named name; None: off."""
         self.input = name or None
         self.device_id = None
+        self._stalls = 0
         self._rebuild()
 
     def set_device(self, device_id, title=None):
@@ -257,6 +264,7 @@ class Mic(QObject):
 
     def stop(self):
         self._timer.stop()
+        self._watchdog.stop()
         if self.pipeline is not None:
             if self._output is not None:        # (macOS: a bin in the output's pipeline)
                 self._output.remove(self.pipeline)
@@ -384,6 +392,9 @@ class Mic(QObject):
                  f'({sink.get_factory().get_name()}{", mixed with the others there" if shared else ""})')
         if not shared:
             self._timer.start()
+        if self._is_input():
+            self._last_level, self._dead_since = time.monotonic(), None
+            self._watchdog.start()
         # what was negotiated, once running: the source's format and the sink's (a quality problem's first clue)
         def negotiated(pipeline=pipeline):
             if pipeline is not self.pipeline:
@@ -398,6 +409,38 @@ class Mic(QObject):
         """An input device (a mic, a line in), not what Blink plays, nor an app's sound."""
         return bool(self.input) and self.link_source is None and self.device_id is None and not self.pulse_source \
             and not self.stereo
+
+    def _heard(self, rms):
+        """A level message: buffers flow; digital zero on every channel noted (the watchdog's DEAD_AFTER)."""
+        now = time.monotonic()
+        self._last_level = now
+        if rms and all(value != value or value <= DEAD_SILENCE for value in rms):
+            if self._dead_since is None:
+                self._dead_since = now
+        else:
+            self._dead_since = None
+            if self._stalls and any(value == value and value > MONO_SILENCE for value in rms):
+                log.info(f'[mic] {self.input}: sound again, after being made anew {self._stalls} time(s)')
+                self._stalls = 0
+
+    def _watch(self):
+        """An input opened, or gone, silent (no buffers, or digital zeros): made anew, as choosing it again did."""
+        if self.pipeline is None or self._last_level is None:
+            return
+        now = time.monotonic()
+        if now - self._last_level >= STALL_AFTER:
+            why = f'no sound from it for {now - self._last_level:.1f} s (stalled)'
+        elif self._dead_since is not None and now - self._dead_since >= DEAD_AFTER:
+            why = f'digital silence for {now - self._dead_since:.1f} s (opened dead)'
+        else:
+            return
+        if self._stalls >= STALL_RETRIES:
+            self._watchdog.stop()
+            log.warning(f'[mic] {self.input}: {why}, still after {self._stalls} times made anew: left as it is')
+            return
+        self._stalls += 1
+        log.warning(f'[mic] {self.input}: {why}: made anew ({self._stalls}/{STALL_RETRIES})')
+        QTimer.singleShot(0, self._rebuild)
 
     def _check_mono(self, rms):
         """Sound on the left, silence on the right for a second: a mono input opened as two channels; opened again
@@ -491,6 +534,7 @@ class Mic(QObject):
         structure = message.get_structure()
         if message.type == Gst.MessageType.ELEMENT and structure is not None and structure.get_name() == 'level':
             rms = _player._doubles(structure, 'rms')
+            self._heard(rms)
             self._check_mono(rms)
             self.levels.emit(rms)
 
@@ -517,6 +561,12 @@ class _Output:
     def __init__(self, key, sink):
         self.key, self.sink = key, sink
         self.pipeline = Gst.Pipeline.new(f'output-{key or "default"}')
+        # the system clock, never an input's: an osxaudiosrc chosen as the clock and then removed (remove: its bin to
+        # NULL, its ring buffer freed) left the mixer's streaming thread waiting on that source's GstAudioClock, which
+        # read the freed ring buffer (gst_audio_base_src_get_time): a segmentation fault in audiomixer:src, the
+        # CLOCK_LOST restart in _poll coming too late. The sink does not sync and _stamp_source stamps the mics by
+        # this clock, so nothing needs the device's own.
+        self.pipeline.use_clock(Gst.SystemClock.obtain())
         self.mixer = Gst.ElementFactory.make('audiomixer', None)
         convert = Gst.ElementFactory.make('audioconvert', None)
         self.mixer.set_property('latency', self.MIXER_LATENCY * Gst.MSECOND)
@@ -602,7 +652,7 @@ class _Output:
             if message.type == Gst.MessageType.LATENCY:         # (an input came or went)
                 self.pipeline.recalculate_latency()
                 continue
-            if message.type == Gst.MessageType.CLOCK_LOST:      # the input whose clock it was left: another one
+            if message.type == Gst.MessageType.CLOCK_LOST:      # (not with the system clock forced: kept in case)
                 self._restart('its clock went with an input')
                 continue
             mic = self._owner(message.src)

@@ -165,7 +165,6 @@ class Player(QObject):
         self._start_paused = False
         self.pipeline = None
         self.output = None              # the output device's name; None: the system's default
-        self._monitor = None
         if Gst is None:
             return
         self.pipeline = Gst.ElementFactory.make('playbin', 'player')
@@ -298,13 +297,12 @@ class Player(QObject):
         """{name: Gst.Device} of the audio outputs (GStreamer's device providers: Core Audio, PulseAudio, PipeWire)."""
         if Gst is None:
             return {}
-        if self._monitor is None:
-            self._monitor = Gst.DeviceMonitor.new()
-            self._monitor.add_filter('Audio/Sink', None)
-            if not self._monitor.start():
-                log.warning('[player] cannot list the audio outputs')
+        # a fresh probe each time, as _probe_outputs: a started monitor kept only what was there when it started on
+        # macOS (Core Audio's provider watches no hot plugging), a device plugged in since neither listed nor played
+        monitor = Gst.DeviceMonitor.new()
+        monitor.add_filter('Audio/Sink', None)
         devices = {}
-        for device in self._monitor.get_devices() or []:
+        for device in monitor.get_devices() or []:
             name = device.get_display_name()
             if OWN_DEVICES.search(name):      # the mixer's own (link.py): not an output to play on
                 continue

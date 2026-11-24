@@ -332,6 +332,7 @@ def remote(bundle_id, command):
 
 # The glyphs around MICROPHONE's INPUT (icons.line_path): what an input is, in the console's own style
 VIRTUAL, AGGREGATE, BLUETOOTH, BLUETOOTH_LE = _fourcc('virt'), _fourcc('grup'), _fourcc('blue'), _fourcc('blea')
+USB = _fourcc('usb ')                    # kAudioDeviceTransportTypeUSB
 
 
 DEFAULT_OUTPUT = _fourcc('dOut')        # kAudioHardwarePropertyDefaultOutputDevice
@@ -342,7 +343,8 @@ HEADPHONE_NAME = re.compile(r'head(set|phone)|airpods|earpods|buds', re.IGNORECA
 
 def output_kinds():
     """{output device name: 'laptop' (the Mac's speakers), 'headset' (headphones: the jack, a USB headset),
-    'bluetooth', 'wave' (virtual, aggregate) or 'speaker' (USB, HDMI, AirPlay...)}; None: the default output's name."""
+    'bluetooth', 'wave' (virtual, aggregate), 'usb' (a USB DAC, interface or speakers) or 'speaker' (HDMI, AirPlay...)};
+    None: the default output's name."""
     kinds = {}
     if sys.platform != 'darwin':
         return kinds
@@ -360,6 +362,8 @@ def output_kinds():
                 kind = 'headset'
             elif transport == BUILT_IN:
                 kind = 'laptop'
+            elif transport == USB:
+                kind = 'usb'
             else:
                 kind = 'speaker'
             kinds[name] = kind

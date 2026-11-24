@@ -412,19 +412,24 @@ class AmpView(AnalogFaces, QWidget):
     default_output_name = None      # the device the system's default output is now (macOS), for its tooltip
     unavailable_outputs = frozenset()      # positions kept for outputs not there now (the headphones unplugged): grey
     other_outputs = ()      # the outputs past the fixed positions: the last position's menu
+    usb_outputs = ()        # the USB outputs, the last used first: their position's menu when more than one
 
-    def set_outputs(self, names, current, unavailable=(), others=()):
+    def set_outputs(self, names, current, unavailable=(), others=(), usb=()):
         """The output selector's positions: the devices' names (the system's default first, added here), the one
         played on (None the default); unavailable: names among them not there now, shown grey and skipped; others:
-        the outputs the last position's menu offers (it the one of them played on, else OTHER_OUTPUTS)."""
+        the outputs the last position's menu offers (it the one of them played on, else OTHER_OUTPUTS); usb: the USB
+        outputs, the last used first (their position the one played on, else the last used; a menu when more than
+        one, none for a single one)."""
         names = [None] + list(names)
         unavailable = frozenset(unavailable)
         others = tuple(others)
+        usb = tuple(usb)
         if names == self.selector.names and current == self.selector.current() and unavailable == self.unavailable_outputs \
-                and others == self.other_outputs:
+                and others == self.other_outputs and usb == self.usb_outputs:
             return
         self.unavailable_outputs = unavailable
         self.other_outputs = others
+        self.usb_outputs = usb
         self.selector.set_names(names, current if current not in unavailable else None)
         self._panel = None
         self.update()
@@ -443,6 +448,14 @@ class AmpView(AnalogFaces, QWidget):
         selector = self.selector
         if self._output_timer.isActive():       # turned by hand, not switched yet: it stays where it was turned
             return
+        if name is not None and name not in selector.names:     # one of a menu's (USB, other outputs): its position shows it
+            usb, other = name in self.usb_outputs, name in self.other_outputs
+            for index, there in enumerate(selector.names):
+                if (usb and there in self.usb_outputs) or (other and (there in self.other_outputs or there == OTHER_OUTPUTS)):
+                    selector.names[index] = name
+                    self._panel = None
+                    self.update()
+                    break
         index = selector.names.index(name) if name in selector.names else 0
         if index != int(selector.value):
             selector.value = index
@@ -532,6 +545,9 @@ class AmpView(AnalogFaces, QWidget):
                 if self.other_outputs is not None and index == len(selector.names) - 1 and self._has_other_position():
                     self._other_menu(event.globalPosition().toPoint())      # the last one: the other outputs, a menu
                     return
+                if self._is_usb_menu(selector.names[index]):
+                    self._usb_menu(event.globalPosition().toPoint())        # USB, more than one: a menu of them
+                    return
             else:       # on its cap: a position on (the grey ones, and the menu's with none chosen, skipped)
                 index = int(selector.value)
                 for _ in selector.names:
@@ -580,7 +596,9 @@ class AmpView(AnalogFaces, QWidget):
                     text = _Selector.title(name)
                     if name is None and self.default_output_name:       # the default: which device it is now
                         text += f' ({self.default_output_name})'
-                    if name == OTHER_OUTPUTS or (name in self.other_outputs and name == selector.names[-1]):
+                    if self._is_usb_menu(name):
+                        text = f'{name} (USB) (click: choose one of {len(self.usb_outputs)})'
+                    elif name == OTHER_OUTPUTS or (name in self.other_outputs and name == selector.names[-1]):
                         text = ('Other outputs' if name == OTHER_OUTPUTS else f'{name} (other outputs)') + \
                             f' (click: choose one of {len(self.other_outputs)})'
                     elif name in self.unavailable_outputs:
@@ -621,7 +639,7 @@ class AmpView(AnalogFaces, QWidget):
 
     def _output_icon_at(self, point):
         """The position of the output whose icon (or letter) past its tick is under point (_draw_selector_scale:
-        at ICON_RING radii, as big as half a radius), else None: hovered, its output named; clicked, played on."""
+        at ICON_RING radii, ICON_SIZE big), else None: hovered, its output named; clicked, played on."""
         selector = self.selector
         if self.web or not self.output_icons:
             return None
@@ -630,12 +648,25 @@ class AmpView(AnalogFaces, QWidget):
                 continue
             angle = math.radians(selector.position_angle(index) - 90)
             where = selector.centre + QPointF(math.cos(angle), math.sin(angle)) * selector.radius * self.ICON_RING
-            if math.hypot(point.x() - where.x(), point.y() - where.y()) <= selector.radius * 0.32:
+            if math.hypot(point.x() - where.x(), point.y() - where.y()) <= selector.radius * self.ICON_SIZE * 0.6:
                 return index
         return None
 
     def _has_other_position(self):
         return bool(self.selector.names) and (self.selector.names[-1] == OTHER_OUTPUTS or self.selector.names[-1] in self.other_outputs)
+
+    def _is_usb_menu(self, name):
+        return name in self.usb_outputs and len(self.usb_outputs) > 1
+
+    def _usb_menu(self, position):
+        """The USB position, more than one plugged in: them, the last used first, the one played on ticked."""
+        menu = QMenu(self)
+        current = self.selector.current()
+        for name in self.usb_outputs:
+            action = menu.addAction(name, lambda name=name: self.output_chosen.emit(name))
+            action.setCheckable(True)
+            action.setChecked(name == current)
+        menu.exec(position)
 
     def _unchoosable(self, name):
         return name in self.unavailable_outputs or name == OTHER_OUTPUTS
@@ -1068,6 +1099,7 @@ class AmpView(AnalogFaces, QWidget):
                              Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
 
     ICON_RING = 1.86        # the output icons' centres, in radii: clear of the ticks (to 1.38) as the style knob's names
+    ICON_SIZE = 0.8         # the output icons (the played on's; the others 0.88 of it), in radii (was 0.5)
 
     def _draw_selector_scale(self, painter, unit):
         """The output selector's marks, a tick a position (the one played on longer), OUTPUT above it, the name of
@@ -1088,7 +1120,7 @@ class AmpView(AnalogFaces, QWidget):
             # what the output is (the Mac's speakers, headphones, Bluetooth...): a small line icon past its tick
             glyph = self.output_icons.get(selector.names[index])
             if glyph and glyph.startswith('@'):     # an output not told apart: a letter of its own in a ring
-                size = radius * (0.5 if current else 0.44)
+                size = radius * (self.ICON_SIZE if current else self.ICON_SIZE * 0.88)
                 where = centre + direction * radius * self.ICON_RING
                 painter.save()
                 if not current:
@@ -1100,7 +1132,7 @@ class AmpView(AnalogFaces, QWidget):
                 painter.drawText(QRectF(where.x() - size / 2, where.y() - size / 2, size, size), Qt.AlignmentFlag.AlignCenter, glyph[1:])
                 painter.restore()
             elif glyph:
-                size = radius * (0.5 if current else 0.44)
+                size = radius * (self.ICON_SIZE if current else self.ICON_SIZE * 0.88)
                 where = centre + direction * radius * self.ICON_RING
                 painter.save()
                 if not current:
@@ -1118,7 +1150,7 @@ class AmpView(AnalogFaces, QWidget):
         painter.setFont(self._lever_font(unit))
         # OUTPUT above it; with icons around it, above them
         icons = any(self.output_icons.get(name) for name in selector.names)
-        lift = radius * (self.ICON_RING - 1.34) if icons else 0.0
+        lift = radius * (self.ICON_RING - 1.34 + (self.ICON_SIZE - 0.5) / 2) if icons else 0.0     # (past the icons' tops)
         painter.drawText(QRectF(centre.x() - width / 2, centre.y() - radius * 1.4 - lift - unit * 0.06, width, unit * 0.05),
                          Qt.AlignmentFlag.AlignCenter, 'OUTPUT')
         if self.web:
@@ -1138,7 +1170,7 @@ class AmpView(AnalogFaces, QWidget):
         middle = self.volume.centre.x()
         wide = min(unit * 0.7, 2 * (inner.right() - unit * 0.03 - middle))
         name = QFontMetricsF(font).elidedText(_Selector.title(selector.current()), Qt.TextElideMode.ElideRight, wide)
-        drop = radius * (self.ICON_RING - 1.5) if icons else 0.0     # (clear of the icons low at each side)
+        drop = radius * (self.ICON_RING - 1.5 + (self.ICON_SIZE - 0.5) / 2) if icons else 0.0     # (clear of the icons low at each side)
         painter.drawText(QRectF(middle - wide / 2, centre.y() + radius * 1.4 + drop + unit * 0.01, wide, unit * 0.05),
                          Qt.AlignmentFlag.AlignCenter, name)
 

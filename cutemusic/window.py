@@ -546,7 +546,8 @@ class MainWindow(QMainWindow):
         self.player.set_balance(amp.balance.value)
         self.player.output_changed.connect(self._output_changed)
         # the amplifier's output selector: a position an output, as the Output device menu
-        amp.output_chosen.connect(lambda name: self._set_output(name or None))
+        amp.output_chosen.connect(lambda name: (self._used_usb(name) if name in amp.usb_outputs else None,
+                                                self._set_output(name or None)))
         amp.mute_toggled.connect(self._set_muted)
         # the mixer: the mic (its own pipeline, on the music's output), the music's fader the volume, VOCAL CUT
         from cutemusic.mic import Mic
@@ -602,6 +603,10 @@ class MainWindow(QMainWindow):
         # chosen: kept (mixer/input, '' Off) and chosen again at the next start (_default_mic)
         mixer.input_chosen.connect(lambda name: (util.settings().setValue('mixer/input', name or ''), self.mic.set_input(name or None)))
         mixer.inputs_wanted.connect(self._mixer_inputs)
+        self._inputs_seen = None
+        self._inputs_timer = QTimer(self, interval=2000)       # inputs plugged in or gone, while the mixer is shown
+        self._inputs_timer.timeout.connect(self._watch_inputs)
+        self._inputs_timer.start()
         mixer.mic_level_changed.connect(self.mic.set_level)
         mixer.echo_changed.connect(lambda value: [mic.set_echo(value) for mic in self._mics()])
         # the other input strips (mixer.py: + and -): a Mic each, as the first, by the strip's key
@@ -2300,8 +2305,8 @@ class MainWindow(QMainWindow):
         amp = self.visuals.amp
         if amp.isVisible():
             devices = self.player.output_devices()
-            names, unavailable, kinds, others = self._amp_positions(devices)
-            amp.set_outputs(names, self.player.output, unavailable, others)
+            names, unavailable, kinds, others, usb = self._amp_positions(devices)
+            amp.set_outputs(names, self.player.output, unavailable, others, usb)
             icons = self._output_icons(devices)
             for name in unavailable:        # (a place kept: its icon as when it was there)
                 icons[name] = kinds[name]
@@ -2313,16 +2318,28 @@ class MainWindow(QMainWindow):
                 from cutemusic import taps
                 amp.default_output_name = taps.output_kinds().get(None)
 
-    # the amplifier's OUTPUT, five positions: the system default (the selector adds it, its icon the circling arrow),
-    # the computer's speakers, the headphones, a Bluetooth device -- their places kept when they are not there (grey),
-    # so they never move -- and the other outputs: a menu of them (there may be many), the position the one of them
-    # played on (else "Other outputs", three dots)
+    # the amplifier's OUTPUT, six positions: the system default (the selector adds it, its icon the circling arrow),
+    # the computer's speakers, the headphones, a Bluetooth device, a USB one -- their places kept when they are not
+    # there (grey), so they never move -- and the other outputs: a menu of them (there may be many), the position the
+    # one of them played on (else "Other outputs", three dots). USB: the one played on, else the last used; more than
+    # one plugged in, a menu of them (the last used first); a single one, played on as the others, no menu
     _AMP_FIXED = (('laptop', 'speakers', 'Speakers'), ('headset', 'headphones', 'Headphones'),
-                  ('bluetooth', 'bluetooth', 'Bluetooth'))
+                  ('bluetooth', 'bluetooth', 'Bluetooth'), ('usb', 'usb', 'USB'))
+
+    @staticmethod
+    def _recent_usb():
+        value = util.settings().value('amp/usb-recent', [])
+        return [value] if isinstance(value, str) else list(value or [])
+
+    def _used_usb(self, name):
+        """A USB output played on: first of the last used (the USB position's menu, the one it shows)."""
+        recent = self._recent_usb()
+        if name and recent[:1] != [name]:
+            util.settings().setValue('amp/usb-recent', ([name] + [other for other in recent if other != name])[:20])
 
     def _amp_positions(self, devices):
-        """([the four positions after the default], {the names not there now: their places kept}, {name: its kind},
-        [the other outputs, by name: the last position's menu])."""
+        """([the five positions after the default], {the names not there now: their places kept}, {name: its kind},
+        [the other outputs, by name: the last position's menu], [the USB outputs, the last used first])."""
         if sys.platform == 'darwin':
             from cutemusic import taps
             kinds = taps.output_kinds()
@@ -2331,11 +2348,18 @@ class MainWindow(QMainWindow):
             kinds = self._output_kinds(devices)
         kinds = {name: kind for name, kind in kinds.items() if name in devices}
         settings = util.settings()
+        if kinds.get(self.player.output) == 'usb':      # (chosen elsewhere too: the Output device menu)
+            self._used_usb(self.player.output)
+        recent = self._recent_usb()
+        usb = sorted((name for name in devices if kinds.get(name) == 'usb'),
+                     key=lambda name: (recent.index(name) if name in recent else len(recent), name.lower()))
         fixed, unavailable = [], set()
         for kind, key, label in self._AMP_FIXED:
             there = sorted((name for name in devices if kinds.get(name) == kind), key=str.lower)
             if kind == 'headset':       # the computer's own (the jack) before a USB or wired headset
                 there.sort(key=lambda name: 0 if re.search(r'external headphones|headphones', name, re.I) else 1)
+            elif kind == 'usb':         # the one played on, else the last used
+                there = ([self.player.output] if self.player.output in usb else []) + usb
             if there:
                 name = there[0]
                 settings.setValue(f'amp/{key}', name)       # its name for when it is not there
@@ -2346,10 +2370,10 @@ class MainWindow(QMainWindow):
                 unavailable.add(name)
             kinds.setdefault(name, kind)
             fixed.append(name)
-        rest = sorted((name for name in devices if name not in fixed), key=str.lower)
+        rest = sorted((name for name in devices if name not in fixed and name not in usb), key=str.lower)
         from cutemusic.amp import OTHER_OUTPUTS
         last = self.player.output if self.player.output in rest else OTHER_OUTPUTS
-        return fixed + [last], unavailable, kinds, rest
+        return fixed + [last], unavailable, kinds, rest, usb
 
     @staticmethod
     def _output_icons(devices):
@@ -2389,6 +2413,7 @@ class MainWindow(QMainWindow):
                            'headset' if form in ('headset', 'headphone', 'hands-free') else
                            'laptop' if form == 'internal' else
                            'wave' if get('device.class') == 'filter' or get('factory.name') == 'support.null-audio-sink' else
+                           'usb' if bus == 'usb' else
                            'speaker')
         return kinds
 
@@ -3417,6 +3442,27 @@ class MainWindow(QMainWindow):
             return
         mixer.set_sources(apps, saved)
         self._music_source(saved)
+
+    def _watch_inputs(self):
+        """The MIC's list made again when an input is plugged in or taken out (the mixer shown; else when shown)."""
+        mixer = self.visuals.mixer
+        if not mixer.isVisible():
+            self._inputs_seen = None
+            return
+        try:
+            names = sorted(self.mic.input_devices(), key=str.lower)
+        except Exception as e:
+            log.warning(f'[mic] cannot list the inputs: {e}')
+            return
+        before, self._inputs_seen = self._inputs_seen, names
+        if before is None or names == before:
+            return
+        for name in sorted(set(names) - set(before)):
+            log.info(f'[mic] input plugged in: {name}')
+        for name in sorted(set(before) - set(names)):
+            log.info(f'[mic] input gone: {name}')
+        mixer.set_inputs(names, self.mic.input)
+        self._input_icons()
 
     def _mixer_inputs(self):
         """The MIC's list of inputs (the mixer shown): on macOS, the microphone permission asked for first (no inputs

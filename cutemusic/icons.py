@@ -257,6 +257,22 @@ def _line_path(name):
         path.lineTo(18.9, 11.6)
         path.lineTo(15.2, 9.6)
         path.addEllipse(QRectF(10.6, 10.6, 2.8, 2.8))
+    elif name == 'usb':             # a USB device: its trident
+        path.moveTo(12.0, 20.0)
+        path.lineTo(12.0, 6.5)
+        path.moveTo(9.5, 7.5)           # the arrowhead
+        path.lineTo(12.0, 3.5)
+        path.lineTo(14.5, 7.5)
+        path.closeSubpath()
+        path.moveTo(12.0, 15.5)         # the left arm, a ring at its end
+        path.lineTo(7.5, 12.5)
+        path.lineTo(7.5, 10.8)
+        path.addEllipse(QPointF(7.5, 9.6), 1.4, 1.4)
+        path.moveTo(12.0, 13.0)         # the right arm, a square at its end
+        path.lineTo(16.5, 10.5)
+        path.lineTo(16.5, 9.2)
+        path.addRect(QRectF(15.3, 6.8, 2.4, 2.4))
+        path.addEllipse(QPointF(12.0, 20.0), 1.5, 1.5)
     elif name == 'more':            # more of them (a menu): three dots
         for x in (6.5, 12.0, 17.5):
             path.addEllipse(QRectF(x - 1.4, 10.6, 2.8, 2.8))
