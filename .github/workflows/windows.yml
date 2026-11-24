@@ -4,8 +4,7 @@
 #     GitHub release v<version> with them
 #   - a tag (a darcs tag synced as one): also a GitHub release of that tag
 #   - by hand: Actions -> Windows -> Run workflow (the artifact only, no release)
-#
-# The working copy is github/ (editable by Claude); .github/ is what GitHub reads: cp -r github/. .github/
+
 name: Windows
 
 on:

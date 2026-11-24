@@ -6,14 +6,9 @@ GitHub: Python, PyQt6 and GStreamer (the GStreamer project's own Python wheels, 
 gstreamer-bundle) packed into one folder by PyInstaller, a zip of it and an installer (Inno Setup, per user, no
 admin rights).
 
-Once (the workflow has to live in .github/workflows, recorded in darcs so the sync carries it):
-
-  mkdir -p .github && cp -r github/. .github/       (github/: the working copy; after each change to it too)
-  darcs add -r windows .github
-
-Then record and push as usual. A build runs only when the version changes (__version__ in cutemusic/__init__.py),
-on a tag, or by hand (Actions -> Windows -> Run workflow), not on every patch. The build is in the GitHub
-repository's Actions tab: its artifact
+The workflow lives in .github/workflows, recorded in darcs so the sync carries it: record and push as usual. A
+build runs only when the version changes (__version__ in cutemusic/__init__.py), on a tag, or by hand (Actions ->
+Windows -> Run workflow), not on every patch. The build is in the GitHub repository's Actions tab: its artifact
 AG-CuteMusic-windows holds AG-CuteMusic-<version>-setup.exe and AG-CuteMusic-<version>-windows.zip.
 Each build is tried too: the self test plays a test song to its end through the app's Player (into a fakesink),
 then the Trial step installs the setup.exe silently, starts the app, takes a screenshot after 20 s and uninstalls it;
