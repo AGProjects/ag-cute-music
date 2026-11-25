@@ -43,10 +43,11 @@ import math
 import time
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (QColor, QConicalGradient, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen,
+from PyQt6.QtGui import (QColor, QConicalGradient, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPainterPath, QPen,
                          QRadialGradient)
 from PyQt6.QtWidgets import QLineEdit, QMenu, QToolTip, QWidget
 
+from cutemusic.util import on_screen
 from cutemusic import util
 from cutemusic.util import log
 from cutemusic.amp import BACKGROUND, AmpView, _Knob, _Selector, draw_knob
@@ -270,7 +271,7 @@ class MixerView(AnalogFaces, QWidget):
     app_output_changed = pyqtSignal(bool)       # THRU: the app heard on its own output too
 
     ASPECT = 1.7            # the strips' part: width / unit
-    BAR = 0.24              # RECORDER's bar under the strips, in units: the console is unit * (1 + BAR) tall
+    BAR = 0.30              # RECORDER's bar under the strips, in units: the console is unit * (1 + BAR) tall (0.24: the tape too small)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -403,7 +404,7 @@ class MixerView(AnalogFaces, QWidget):
         self.call_selector = _CallSelector()      # BLINK's call switch: left HANG UP, right REDIAL
         self._dialing_since = None  # turned to REDIAL (monotonic): kept there till the call shows (or does not)
         self._visible = []          # (strip, fader, meter, name) as laid out
-        self.timer = QTimer(self, interval=16)      # 60 a second: the meters, and the reels turning fluidly
+        self.timer = QTimer(self, interval=33 if self.needle_meters else 16)      # the LEDs and the reels 60 a second; needles 30 (amp.NEEDLE_FRAME)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)        # (even steps)
         self.timer.timeout.connect(self._tick)
         self.last = time.monotonic()
@@ -635,7 +636,7 @@ class MixerView(AnalogFaces, QWidget):
             self._title_editor = editor
         editor = self._title_editor
         rect = self._label_rect
-        editor.setFont(self._font(max(10, rect.height() * 0.5), weight=QFont.Weight.DemiBold))
+        editor.setFont(self._font(max(12, rect.height() * 0.75), weight=QFont.Weight.DemiBold))
         editor.setGeometry(rect.adjusted(-2, -3, 2, 3).toAlignedRect())
         editor.setText(self.record_title)
         editor.setPlaceholderText(TITLE_HINT)
@@ -845,6 +846,7 @@ class MixerView(AnalogFaces, QWidget):
         mixer/needle_meters), instead of the LED columns. The room's people's meters stay LEDs (too narrow for dials)."""
         if on != self.needle_meters:
             self.needle_meters = on
+            self.timer.setInterval(33 if on else 16)       # needles: 30 a second
             util.settings().setValue('mixer/needle_meters', on)
             log.info(f'[ui] Mixer meters: {"analog needles" if on else "LEDs"}')
             self._layout()      # the faders placed for them
@@ -1169,10 +1171,60 @@ class MixerView(AnalogFaces, QWidget):
             font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 100 + spacing)
         return font
 
+    # Drawn in two layers: the console (all that moves only when something changes: a click, a state, the recording's
+    # time once a second) drawn once into a picture and redrawn only after self.update(); over it each frame what moves
+    # (the meters, the tape's window with its reels), asked for by the tick with _update_moving() (the console kept)
+
+    _console = None             # ((width, height, ratio), the console's picture)
+    _console_stale = True
+
+    def update(self, *args):
+        self._console_stale = True
+        super().update(*args)
+
+    def _update_moving(self, rect):
+        QWidget.update(self, rect)
+
     def paintEvent(self, event):
         if not self._strips:
             self._layout()
+        ratio = self.devicePixelRatioF()
+        key = (self.width(), self.height(), ratio)
+        if self._console is None or self._console_stale or self._console[0] != key:
+            image = QImage(max(1, round(self.width() * ratio)), max(1, round(self.height() * ratio)),
+                           QImage.Format.Format_ARGB32_Premultiplied)
+            image.setDevicePixelRatio(ratio)
+            console = QPainter(image)
+            self._paint_console(console)
+            console.end()
+            self._console, self._console_stale = (key, image), False
         painter = QPainter(self)
+        painter.drawImage(QPointF(0, 0), self._console[1])
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._paint_moving(painter)
+
+    def _paint_moving(self, painter):
+        """Each frame, over the console: the strips' meters (LEDs, needles, a room's people) and the tape's window,
+        dimmed as the console draws them (POWER off; APPS with THRU while nothing is sent)."""
+        opacity = 1.0 if self.powered else 0.35
+        for strip, fader, meter, name in self._visible:
+            painter.save()
+            painter.setOpacity(opacity * (0.35 if name == 'MUSIC' and self.thru() and not self.sending() else 1.0))
+            if name == 'BLINK' and self.blink_participants:     # a room: its people's meters, not the mix's
+                self._draw_participant_meters(painter, strip, meter)
+            else:
+                self._draw_meter(painter, meter, strip)
+            painter.restore()
+        if self.recorder_shown and self._strips:
+            painter.save()
+            painter.setOpacity(opacity)
+            view = QPainterPath()
+            view.addRoundedRect(self._tape_view, self.unit * 0.012, self.unit * 0.012)
+            painter.setClipPath(view)
+            self._draw_tape_window(painter, self._tape_rect)
+            painter.restore()
+
+    def _paint_console(self, painter):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), BACKGROUND)
         unit, panel = self.unit, self.panel
@@ -1319,11 +1371,7 @@ class MixerView(AnalogFaces, QWidget):
                 if not self.sending():
                     painter.setOpacity(painter.opacity() * 0.35)
             self._draw_scale(painter, fader)
-            if name == 'BLINK' and self.blink_participants:     # a room: its people's meters, not the mix's
-                self._draw_participant_meters(painter, strip, meter)
-            else:
-                self._draw_meter(painter, meter, strip)
-            self._draw_fader(painter, fader)
+            self._draw_fader(painter, fader)        # (the meters, right of it: drawn over the console each frame, _paint_moving)
             painter.restore()
         painter.setOpacity(1.0)
 
@@ -1518,7 +1566,6 @@ class MixerView(AnalogFaces, QWidget):
         p = painter
         w, h = rect.width(), rect.height()
         recording = self.recording
-        wound = min(1.0, (time.monotonic() - self.record_started) / 3600) if recording else 0.0
         p.save()
         for k in range(6):      # its shadow
             p.setPen(Qt.PenStyle.NoPen)
@@ -1571,68 +1618,19 @@ class MixerView(AnalogFaces, QWidget):
         p.setPen(QColor('#22252a'))
         # the recording's title written on it, else "Enter title..." (a click edits it: the file renamed, or the next
         # recording's title)
-        p.setFont(self._font(label.height() * 0.56, weight=QFont.Weight.DemiBold))
+        p.setFont(self._font(label.height() * 0.7, weight=QFont.Weight.DemiBold))
         if self.record_title:
             p.drawText(text, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                        QFontMetricsF(p.font()).elidedText(self.record_title, Qt.TextElideMode.ElideRight, text.width()))
         else:
-            hint = self._font(label.height() * 0.56, weight=QFont.Weight.Normal)
+            hint = self._font(label.height() * 0.7, weight=QFont.Weight.Normal)
             hint.setItalic(True)
             p.setFont(hint)
             p.setPen(QColor('#9b968a'))
             p.drawText(text, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                        QFontMetricsF(hint).elidedText(TITLE_HINT, Qt.TextElideMode.ElideRight, text.width()))
         self._label_rect = QRectF(text.left(), text.top(), text.width(), text.height())
-        # the window, large: the hubs' centres at its two ends, half of each seen; the reels themselves inside the
-        # shell, their packs' inner edges and the tape between them showing
-        win = QRectF(rect.left() + w * 0.2, rect.top() + h * 0.45, w * 0.6, h * 0.38)
-        p.setPen(QPen(QColor('#050506'), 1))
-        p.setBrush(QColor('#07080a'))
-        p.drawRoundedRect(win.adjusted(-2, -2, 2, 2), h * 0.02, h * 0.02)
-        p.save()
-        clip = QPainterPath()
-        clip.addRoundedRect(win, h * 0.015, h * 0.015)
-        p.setClipPath(clip)
-        p.fillRect(win, QColor('#14100d'))
-        r = win.height() * 0.62
-        hubs = [QPointF(win.left() + r * 0.15, win.center().y()), QPointF(win.right() - r * 0.15, win.center().y())]
-        for centre, amount in zip(hubs, (1.0 - wound * 0.6, 0.4 + wound * 0.6)):
-            radius = r * (1.25 + 0.9 * amount)
-            pack = QRadialGradient(centre, radius)
-            pack.setColorAt(0, QColor('#5a4032'))
-            pack.setColorAt(0.85, QColor('#3d2a20'))
-            pack.setColorAt(1, QColor('#2a1c15'))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(pack)
-            p.drawEllipse(centre, radius, radius)
-        # both reels in step, counter-clockwise (the tape going from the left reel to the right one), eased (_tick)
-        reels = self._reel_angle
-        for index, centre in enumerate(hubs):
-            radius = r * 0.8
-            metal = QRadialGradient(centre - QPointF(radius * 0.3, radius * 0.3), radius * 1.4)
-            metal.setColorAt(0, QColor('#f3f4f5'))
-            metal.setColorAt(1, QColor('#9da2a8'))
-            p.setPen(QPen(QColor('#3a3d42'), 0.8))
-            p.setBrush(metal)
-            p.drawEllipse(centre, radius, radius)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor('#15171a'))
-            start = reels       # (both together, the same way)
-            for k in range(6):      # the drive teeth around the centre hole
-                angle = math.radians(start + k * 60)
-                p.drawEllipse(centre + QPointF(math.cos(angle), math.sin(angle)) * radius * 0.55, radius * 0.12, radius * 0.12)
-            p.drawEllipse(centre, radius * 0.28, radius * 0.28)
-            p.setBrush(QColor('#c9ccd0'))
-            p.drawEllipse(centre, radius * 0.1, radius * 0.1)
-        p.fillRect(win, QColor(40, 50, 60, 70))      # the smoked glass, its highlight
-        glare = QLinearGradient(win.topLeft(), win.bottomRight())
-        glare.setColorAt(0.0, QColor(255, 255, 255, 50))
-        glare.setColorAt(0.35, QColor(255, 255, 255, 0))
-        p.fillRect(win, glare)
-        p.restore()
-        p.setPen(QPen(QColor(255, 255, 255, 22), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(win.adjusted(-0.5, -0.5, 0.5, 0.5), h * 0.015, h * 0.015)
+        # (the window, its reels turning: drawn over the console each frame, _draw_tape_window)
         # the write-protect tab (closed: dark, while it records), the slider's guide holes
         tab = QRectF(rect.left() + w * 0.07, rect.top() + h * 0.6, w * 0.07, h * 0.08)
         p.setPen(QPen(QColor('#050506'), 0.8))
@@ -1651,6 +1649,120 @@ class MixerView(AnalogFaces, QWidget):
         p.setBrush(light)
         p.drawPath(sheen)
         p.restore()
+
+    TAPE_SIDE = 1800.0      # s a side of the tape lasts (30 min): at its end it turns the other way (auto-reverse), filling the other spool
+    _reel_direction = 1.0
+
+    def _tape_side(self):
+        """Which side the recording is on now: 0, 1, 2... (even: forward, odd: reversed)."""
+        return int((time.monotonic() - self.record_started) / self.TAPE_SIDE) if self.recording else 0
+
+    def _tape_wound(self):
+        """How much of the tape is on the right spool, 0..1: up a side forward, down the next one reversed."""
+        if not self.recording:
+            return 0.0
+        phase = (time.monotonic() - self.record_started) / self.TAPE_SIDE % 2.0
+        return phase if phase <= 1.0 else 2.0 - phase
+
+    def _draw_tape_window(self, p, rect):
+        """The cassette's window (_draw_tape): the tape packs, the hubs turning, the smoked glass. Each frame, over the
+        console's picture of the cassette: two pictures (under the teeth: the packs and the hubs' metal, again only as
+        the packs grow, by a thousandth; over them: the smoked glass) and between them the teeth turning."""
+        w, h = rect.width(), rect.height()
+        wound = self._tape_wound()
+        # the window, large: the hubs' centres at its two ends, half of each seen; the reels themselves inside the
+        # shell, their packs' inner edges and the tape between them showing
+        win = QRectF(rect.left() + w * 0.2, rect.top() + h * 0.45, w * 0.6, h * 0.38)
+        r = win.height() * 0.62
+        hubs = [QPointF(win.left() + r * 0.15, win.center().y()), QPointF(win.right() - r * 0.15, win.center().y())]
+        outer = win.adjusted(-3, -3, 3, 3)
+        ratio = self.devicePixelRatioF()
+        size = (round(w, 2), round(h, 2), ratio)
+        cache = self.__dict__.setdefault('_tape_cache', {})
+        wound = round(wound, 3)
+        under = cache.get(('under', size, wound))
+        if under is None:
+            for key in [key for key in cache if key[0] == 'under']:
+                del cache[key]
+            under = cache[('under', size, wound)] = self._tape_picture(outer, ratio, lambda q: self._tape_under(q, win, h, r, hubs, wound))
+        over = cache.get(('over', size))
+        if over is None:
+            over = cache[('over', size)] = self._tape_picture(outer, ratio, lambda q: self._tape_over(q, win, h))
+        p.drawImage(outer.topLeft(), under)
+        p.save()
+        clip = QPainterPath()
+        clip.addRoundedRect(win, h * 0.015, h * 0.015)
+        p.setClipPath(clip, Qt.ClipOperation.IntersectClip)
+        # both reels in step, counter-clockwise (the tape going from the left reel to the right one), eased (_tick)
+        reels = self._reel_angle
+        p.setPen(Qt.PenStyle.NoPen)
+        for centre in hubs:
+            radius = r * 0.8
+            p.setBrush(QColor('#15171a'))
+            for k in range(6):      # the drive teeth around the centre hole
+                angle = math.radians(reels + k * 60)
+                p.drawEllipse(centre + QPointF(math.cos(angle), math.sin(angle)) * radius * 0.55, radius * 0.12, radius * 0.12)
+            p.drawEllipse(centre, radius * 0.28, radius * 0.28)
+            p.setBrush(QColor('#c9ccd0'))
+            p.drawEllipse(centre, radius * 0.1, radius * 0.1)
+        p.restore()
+        p.drawImage(outer.topLeft(), over)
+
+    @staticmethod
+    def _tape_picture(outer, ratio, draw):
+        image = QImage(max(1, math.ceil(outer.width() * ratio)), max(1, math.ceil(outer.height() * ratio)),
+                       QImage.Format.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.translate(-outer.left(), -outer.top())
+        draw(painter)
+        painter.end()
+        return image
+
+    @staticmethod
+    def _tape_under(p, win, h, r, hubs, wound):
+        p.setPen(QPen(QColor('#050506'), 1))
+        p.setBrush(QColor('#07080a'))
+        p.drawRoundedRect(win.adjusted(-2, -2, 2, 2), h * 0.02, h * 0.02)
+        clip = QPainterPath()
+        clip.addRoundedRect(win, h * 0.015, h * 0.015)
+        p.setClipPath(clip)
+        p.fillRect(win, QColor('#14100d'))
+        for centre, amount in zip(hubs, (1.0 - wound * 0.6, 0.4 + wound * 0.6)):
+            radius = r * (1.25 + 0.9 * amount)
+            pack = QRadialGradient(centre, radius)
+            pack.setColorAt(0, QColor('#5a4032'))
+            pack.setColorAt(0.85, QColor('#3d2a20'))
+            pack.setColorAt(1, QColor('#2a1c15'))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(pack)
+            p.drawEllipse(centre, radius, radius)
+        for centre in hubs:
+            radius = r * 0.8
+            metal = QRadialGradient(centre - QPointF(radius * 0.3, radius * 0.3), radius * 1.4)
+            metal.setColorAt(0, QColor('#f3f4f5'))
+            metal.setColorAt(1, QColor('#9da2a8'))
+            p.setPen(QPen(QColor('#3a3d42'), 0.8))
+            p.setBrush(metal)
+            p.drawEllipse(centre, radius, radius)
+
+    @staticmethod
+    def _tape_over(p, win, h):
+        clip = QPainterPath()
+        clip.addRoundedRect(win, h * 0.015, h * 0.015)
+        p.save()
+        p.setClipPath(clip)
+        p.fillRect(win, QColor(40, 50, 60, 70))      # the smoked glass, its highlight
+        glare = QLinearGradient(win.topLeft(), win.bottomRight())
+        glare.setColorAt(0.0, QColor(255, 255, 255, 50))
+        glare.setColorAt(0.35, QColor(255, 255, 255, 0))
+        p.fillRect(win, glare)
+        p.restore()
+        p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(win.adjusted(-0.5, -0.5, 0.5, 0.5), h * 0.015, h * 0.015)
 
     def _draw_library(self, painter, strip, label, light):
         """LOCAL LIBRARY's top: NOW PLAYING (or PAUSED), the song's title in orange (grey paused), the artist under it;
@@ -2279,24 +2391,51 @@ class MixerView(AnalogFaces, QWidget):
         if self.needle_meters and strip is not None:
             self._draw_needles(painter, meter, strip)
             return
+        # two pictures a size (all its LEDs dark on the meter's black, all of them lit), drawn once; each frame the dark
+        # one, then of each column the lit one up to its level, and its held peak's LED
         rect = meter.rect
         columns = len(meter.levels)
-        width = (rect.width() - self.unit * 0.006 * (columns - 1)) / columns
+        gap = self.unit * 0.006
+        width = (rect.width() - gap * (columns - 1)) / columns
         step = rect.height() / SEGMENTS
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor('#0d0e10'))
-        painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 3, 3)
+        outer = rect.adjusted(-3, -3, 3, 3)
+        ratio = self.devicePixelRatioF()
+        key = (round(rect.width(), 2), round(rect.height(), 2), columns, round(gap, 3), ratio)
+        cache = self.__dict__.setdefault('_led_cache', {})
+        pictures = cache.get(key)
+        if pictures is None:
+            if len(cache) > 32:
+                cache.clear()
+            pictures = cache[key] = [self._tape_picture(outer, ratio, lambda q, on=on: self._leds(q, rect, outer, columns, width, gap, step, on))
+                                     for on in (False, True)]
+        dark, lit_picture = pictures
+        painter.drawImage(outer.topLeft(), dark)
+
+        def lit_part(target):
+            painter.drawImage(target, lit_picture, QRectF((target.left() - outer.left()) * ratio, (target.top() - outer.top()) * ratio,
+                                                          target.width() * ratio, target.height() * ratio))
         for column, (level, (peak, since)) in enumerate(zip(meter.levels, meter.peaks)):
-            x = rect.left() + column * (width + self.unit * 0.006)
+            x = rect.left() + column * (width + gap)
             lit = (level - DB_LOW) / (DB_HIGH - DB_LOW) * SEGMENTS
             held = int((peak - DB_LOW) / (DB_HIGH - DB_LOW) * SEGMENTS)
+            count = max(0, min(SEGMENTS, math.ceil(lit))) if lit > 0 else 0       # the segments under lit
+            if count:
+                lit_part(QRectF(x, rect.bottom() - count * step, width, count * step))
+            if peak > DB_LOW + 1 and count < held <= SEGMENTS:
+                lit_part(QRectF(x, rect.bottom() - held * step, width, step))
+
+    @staticmethod
+    def _leds(painter, rect, outer, columns, width, gap, step, on):
+        painter.setPen(Qt.PenStyle.NoPen)
+        if not on:
+            painter.setBrush(QColor('#0d0e10'))
+            painter.drawRoundedRect(outer, 3, 3)
+        for column in range(columns):
+            x = rect.left() + column * (width + gap)
             for segment in range(SEGMENTS):
                 db = DB_LOW + (segment + 1) / SEGMENTS * (DB_HIGH - DB_LOW)
                 color = QColor('#ff3b30') if db > -3 else QColor('#ffcc00') if db > -12 else QColor('#34c759')
-                on = segment < lit or (segment == held - 1 and peak > DB_LOW + 1)
-                if not on:
-                    color = color.darker(520)
-                painter.setBrush(color)
+                painter.setBrush(color if on else color.darker(520))
                 y = rect.bottom() - (segment + 1) * step
                 painter.drawRect(QRectF(x, y + step * 0.15, width, step * 0.7))
 
@@ -2310,7 +2449,16 @@ class MixerView(AnalogFaces, QWidget):
     def hideEvent(self, event):
         self.timer.stop()
 
+    def wake(self):
+        """Back on screen (the window's watch): the meters and the reels again."""
+        if not self.timer.isActive() and on_screen(self):
+            self.last = time.monotonic()
+            self.timer.start()
+
     def _tick(self):
+        if not on_screen(self):         # minimized, covered: nothing computed nor drawn (woken by wake(), the window's watch)
+            self.timer.stop()
+            return
         now = time.monotonic()
         elapsed, self.last = now - self.last, now
         moved = False
@@ -2326,7 +2474,7 @@ class MixerView(AnalogFaces, QWidget):
         if people:      # their meters: the BLINK strip's
             blink = next((strip for strip, fader, meter, name in self._visible if name == 'BLINK'), None)
             if blink is not None:
-                self.update(blink.toAlignedRect())
+                self._update_moving(blink.toAlignedRect())
         # the reels, as the meters' needles: their speed eased towards where it goes (spinning up at REC, coasting down
         # after), the angle following it; only the tape's band drawn again each step (cheap: every frame in time)
         target = REEL_SPEED if self.recording else 0.0
@@ -2334,16 +2482,19 @@ class MixerView(AnalogFaces, QWidget):
         if self._reel_speed < 0.5 and not self.recording:
             self._reel_speed = 0.0
         if self._reel_speed:
-            self._reel_angle = (self._reel_angle - self._reel_speed * elapsed) % 360.0     # counter-clockwise
+            if self.recording:      # which way: the side it is on (auto-reverse at a side's end); kept while coasting
+                self._reel_direction = -1.0 if self._tape_side() % 2 else 1.0
+            # forward counter-clockwise (the tape from the left reel to the right), reversed clockwise
+            self._reel_angle = (self._reel_angle - self._reel_direction * self._reel_speed * elapsed) % 360.0
             if self._strips:
-                self.update(self._tape_view.adjusted(-2, -2, 2, 2).toAlignedRect())
+                self._update_moving(self._tape_view.adjusted(-2, -2, 2, 2).toAlignedRect())
         if self.recording and int(now - self.record_started) != self._bar_second:        # the time: once a second
             self._bar_second = int(now - self.record_started)
             self.update(self._bar.adjusted(-2, -2, 2, 2).toAlignedRect() if self._strips else self.rect())
         if moved:
             for strip, fader, meter, name in self._visible:
                 area = self._needle_area(meter, strip) if self.needle_meters else meter.rect
-                self.update(area.adjusted(-4, -4, 4, 4).toAlignedRect())
+                self._update_moving(area.adjusted(-4, -4, 4, 4).toAlignedRect())
 
     # The mouse
 

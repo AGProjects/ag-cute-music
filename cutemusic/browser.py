@@ -750,6 +750,43 @@ class Browser(QWidget):
             util.settings().setValue('browser/colors', [])
         self.rebuild()
 
+    def view_state(self):
+        """What the browser shows now (the words, genres and colours, the groups open, the selection, where it is
+        scrolled), for restore_view_state(): the TAPES button's way back."""
+        item = self.tree.currentItem()
+        return {'filter': self.filter.text(), 'genres': set(self.genres.selected), 'colors': set(self.colors.checked()),
+                'expanded': self._expanded_paths(), 'current': self._item_path(item) if item is not None else None,
+                'selected': [self._item_path(item) for item in self.tree.selectedItems()],
+                'scroll': self.tree.verticalScrollBar().value()}
+
+    def restore_view_state(self, state):
+        self.filter.blockSignals(True)
+        self.filter.setText(state['filter'])
+        self.filter.blockSignals(False)
+        self._filter_timer.stop()
+        if self.genres.selected != state['genres']:
+            self.genres.selected = set(state['genres'])
+            self.genres._save()
+            self.genres._fill()
+            self.genres._label()
+        if set(self.colors.checked()) != state['colors']:
+            self.colors.set_checked(state['colors'])
+            util.settings().setValue('browser/colors', [name for name in markers.NAMES if name in state['colors']])
+        self.rebuild()
+        self.tree.collapseAll()
+        self._restore_expanded(state['expanded'])
+        current = self._find_path(state['current']) if state['current'] else None
+        if current is not None:
+            self.tree.setCurrentItem(current)
+        self.tree.clearSelection()
+        for path in state['selected']:
+            item = self._find_path(path)
+            if item is not None:
+                item.setSelected(True)
+        scroll = state['scroll']
+        self.tree.verticalScrollBar().setValue(scroll)
+        QTimer.singleShot(0, lambda: self.tree.verticalScrollBar().setValue(scroll))     # (after the layout)
+
     def _mode_changed(self):
         util.settings().setValue('browser/mode', self.mode.currentData())
         # what is selected, found again in the new view (its tree has other parents: rebuild's own restoring by the
@@ -1214,6 +1251,23 @@ class Browser(QWidget):
                 if found is not None and found.path == track.path:
                     return child
                 items.append(child)
+        return None
+
+    def track_after(self, track):
+        """The track after this one in the tree as shown (its album, then the next ones; the filters applied), else
+        None: Next by hand when the queue has nothing after it."""
+        found, items = False, [self.tree.invisibleRootItem()]
+        while items:
+            item = items.pop()
+            for index in reversed(range(item.childCount())):
+                items.append(item.child(index))
+            other = item.data(0, TRACK) if item is not self.tree.invisibleRootItem() else None
+            if other is None:
+                continue
+            if found and not other.get('pending'):
+                return other
+            if other.path == track.path:
+                found = True
         return None
 
     def _artist_item(self, item, track):

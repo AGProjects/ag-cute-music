@@ -23,6 +23,7 @@ from PyQt6.QtGui import (QColor, QConicalGradient, QDesktopServices, QFont, QFon
                          QPainterPath, QPen, QPixmap, QRadialGradient)
 from PyQt6.QtWidgets import QMenu, QToolButton, QToolTip, QWidget
 
+from cutemusic.util import on_screen
 from cutemusic import util
 from cutemusic.icons import line_path
 from cutemusic.vufaces import AnalogFaces
@@ -54,6 +55,9 @@ _PLATE_COLORS = {
 
 
 OTHER_OUTPUTS = '\u2026'     # OUTPUT's fifth position with no other output played on: a menu of them
+
+NEEDLE_FRAME = 33         # ms between two frames of moving needles (30 a second; the bars and LEDs keep 60)
+
 
 class _Knob:
     """A knob's value and range; where it is drawn is set by the view's layout."""
@@ -240,7 +244,7 @@ class AmpView(AnalogFaces, QWidget):
         self._panel_key = None      # (width, height, pixel ratio) it was drawn for
         self._wheel_rest, self._wheel_knob_last = 0.0, None
         self._layout = None
-        self.timer = QTimer(self, interval=16)
+        self.timer = QTimer(self, interval=NEEDLE_FRAME)      # the needles at 30 a second: as smooth to the eye, half the drawing
         self.timer.timeout.connect(self._tick)
         # the meter window's style: a lever on the panel (its positions: METERS); the VU meter page's styles drawn in
         # the window
@@ -470,8 +474,8 @@ class AmpView(AnalogFaces, QWidget):
         self.update()
 
     def _wake(self):
-        """The timer again (stopped when the needles came to rest, paused or stopped): levels are coming."""
-        if self.isVisible() and not self.timer.isActive():
+        """The timer again (stopped when the needles came to rest, paused or stopped, or off screen): levels are coming."""
+        if not self.timer.isActive() and on_screen(self):
             self.last = time.monotonic()
             self.timer.start()
 
@@ -783,6 +787,9 @@ class AmpView(AnalogFaces, QWidget):
         self.timer.stop()
 
     def _tick(self):
+        if not on_screen(self):         # minimized, covered: nothing computed nor drawn (woken by _wake, the window's watch)
+            self.timer.stop()
+            return
         now = time.monotonic()
         elapsed, self.last = now - self.last, now
         if now - self.received > self.STALE:

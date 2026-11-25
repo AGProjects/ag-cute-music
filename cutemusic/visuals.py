@@ -11,6 +11,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QLinearGradient, QPainter
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QTextBrowser,
                              QToolButton, QVBoxLayout, QWidget)
 
+from cutemusic.util import on_screen
 from cutemusic import util
 from cutemusic.library import parse_lrc, read_artist_image, read_cover, read_lyrics
 from cutemusic.icons import set_line_icon
@@ -350,6 +351,7 @@ class VUMeter(AnalogFaces, QWidget):
 
     def set_style(self, style):
         self.style = style
+        self.timer.setInterval(33 if style == 'needles' else 16)        # needles: 30 a second (amp.NEEDLE_FRAME)
         self.update()
         self.style_changed.emit(style)
 
@@ -381,8 +383,8 @@ class VUMeter(AnalogFaces, QWidget):
         self.timer.stop()
 
     def _wake(self):
-        """The timer again (stopped when all came to rest, paused or stopped): levels are coming."""
-        if self.isVisible() and not self.timer.isActive():
+        """The timer again (stopped when all came to rest, paused or stopped, or off screen): levels are coming."""
+        if not self.timer.isActive() and on_screen(self):
             self.last = time.monotonic()
             self.timer.start()
 
@@ -464,6 +466,9 @@ class VUMeter(AnalogFaces, QWidget):
         return changed
 
     def _tick(self):
+        if not on_screen(self):         # minimized, covered: nothing computed nor drawn (woken by _wake, the window's watch)
+            self.timer.stop()
+            return
         now = time.monotonic()
         elapsed, self.last = now - self.last, now
         busy = False
@@ -530,10 +535,13 @@ class VUMeter(AnalogFaces, QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), BACKGROUND)
         font = QFont(self.font())
         font.setPointSizeF(font.pointSizeF() * 0.85)
+        if self.style == 'spectrum':
+            self._paint_spectrum_cached(painter, font)
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), BACKGROUND)
         painter.setFont(font)
         left, top = self._frame()
         painter.translate(left, top)        # room around the meter (the needles keep their own)
@@ -684,17 +692,67 @@ class VUMeter(AnalogFaces, QWidget):
             last = y
 
 
-    def _paint_spectrum(self, painter):
-        count = len(self.bars) or self._bar_count()
-        bars = self.bars or [self.DB_LOW] * count
-        peaks = self.bar_peaks or [(self.DB_LOW, 0.0)] * count
+    def _spectrum_geometry(self, count):
+        """(side, label size, labels shown, top, bottom, step, gap) of count bars, in the frame's coordinates."""
         side = 12.0
         label = max(6.0, min(11.0, self._ah() * 0.05))
         labels = self._ah() >= 120
         top, bottom = 10.0, self._ah() - (label * 2.2 if labels else 8.0)
-        height = bottom - top
         step = (self._aw() - 2 * side) / count
-        gap = max(1.0, step * 0.18)
+        return side, label, labels, top, bottom, step, max(1.0, step * 0.18)
+
+    # the spectrum drawn from two pictures made once (per size, count of bars and font): the background (the empty
+    # slots, the frequencies) and every bar lit full height; each frame the background, then of each bar the part of
+    # the lit one up to its level (a copy of pixels, no gradient filled, no antialiasing), and the peaks
+    _spectrum_cache = None
+
+    def _paint_spectrum_cached(self, painter, font):
+        count = len(self.bars) or self._bar_count()
+        left, top = self._frame()
+        ratio = self.devicePixelRatioF()
+        key = (self.width(), self.height(), ratio, count, left, top, font.key())
+        if self._spectrum_cache is None or self._spectrum_cache[0] != key:
+            pictures = []
+            for mode in ('empty', 'full'):
+                image = QImage(max(1, round(self.width() * ratio)), max(1, round(self.height() * ratio)),
+                               QImage.Format.Format_ARGB32_Premultiplied)
+                image.setDevicePixelRatio(ratio)
+                image.fill(BACKGROUND if mode == 'empty' else Qt.GlobalColor.transparent)
+                cached = QPainter(image)
+                cached.setRenderHint(QPainter.RenderHint.Antialiasing)
+                cached.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+                cached.setFont(font)
+                cached.translate(left, top)
+                self._paint_spectrum(cached, count=count, mode=mode)
+                cached.end()
+                pictures.append(image)
+            self._spectrum_cache = (key, *pictures)
+        _, back, lit = self._spectrum_cache
+        painter.drawImage(QPointF(0, 0), back)
+        bars = self.bars or [self.DB_LOW] * count
+        peaks = self.bar_peaks or [(self.DB_LOW, 0.0)] * count
+        side, _, _, slot_top, bottom, step, gap = self._spectrum_geometry(count)
+        span = self.DB_HIGH - self.DB_LOW
+        height = bottom - slot_top
+        width = step - gap
+        white = QColor('#e8eaf0')
+        for index in range(count):
+            x = left + side + index * step + gap / 2
+            level = bottom - max(0.0, min(1.0, (bars[index] - self.DB_LOW) / span)) * height
+            if level < bottom:
+                target = QRectF(x, top + level, width, bottom - level)
+                painter.drawImage(target, lit, QRectF(x * ratio, (top + level) * ratio, width * ratio, (bottom - level) * ratio))
+            peak = bottom - max(0.0, min(1.0, (peaks[index][0] - self.DB_LOW) / span)) * height
+            if peak < bottom - 1:
+                painter.fillRect(QRectF(x, top + peak - 1, width, 2), white)
+
+    def _paint_spectrum(self, painter, count=None, mode='live'):
+        """mode 'live': as it is now; 'empty': the slots and the frequencies only; 'full': only the bars, all lit."""
+        count = count or len(self.bars) or self._bar_count()
+        bars = [self.DB_HIGH] * count if mode == 'full' else (self.bars if mode == 'live' and self.bars else [self.DB_LOW] * count)
+        peaks = self.bar_peaks if mode == 'live' and self.bar_peaks else [(self.DB_LOW, 0.0)] * count
+        side, label, labels, top, bottom, step, gap = self._spectrum_geometry(count)
+        height = bottom - top
         # the LED colours (_paint_leds) up the height: green, then amber, red at the top
         gradient = QLinearGradient(0, bottom, 0, top)
         gradient.setColorAt(0.0, QColor('#2e8f6c'))
@@ -709,14 +767,15 @@ class VUMeter(AnalogFaces, QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         for index in range(count):
             x = side + index * step + gap / 2
-            painter.fillRect(QRectF(x, top, step - gap, height), QColor('#1a1e26'))     # the empty slot
+            if mode != 'full':
+                painter.fillRect(QRectF(x, top, step - gap, height), QColor('#1a1e26'))     # the empty slot
             level = y(bars[index])
             if level < bottom:
                 painter.fillRect(QRectF(x, level, step - gap, bottom - level), brush)
             peak = y(peaks[index][0])
             if peak < bottom - 1:
                 painter.fillRect(QRectF(x, peak - 1, step - gap, 2), QColor('#e8eaf0'))
-        if not labels:
+        if not labels or mode == 'full':
             return
         font = QFont(painter.font())
         font.setPixelSize(round(label))

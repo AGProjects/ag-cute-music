@@ -139,11 +139,8 @@ class LavaLamp(QWidget):
         self._watch.stop()
 
     def _seen(self):
-        if not self.isVisible() or self.visibleRegion().isEmpty():
-            return False
-        window = self.window()
-        handle = window.windowHandle()
-        return not window.isMinimized() and (handle is None or handle.isExposed())
+        from cutemusic.util import on_screen
+        return on_screen(self)
 
     def _run(self):
         if self._seen():

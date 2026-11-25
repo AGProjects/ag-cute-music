@@ -111,6 +111,8 @@ def main():
     from cutemusic.player import gst_error
     if gst_error:
         util.log.warning(f'GStreamer is not available: {gst_error}')
+    from cutemusic import profiler
+    profiler.install()      # --profile: where the CPU goes, per component (before the views connect their timers)
     from cutemusic.window import MainWindow
     window = MainWindow()
     from cutemusic.theme import apply_title_bar

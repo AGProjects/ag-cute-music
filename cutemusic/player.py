@@ -51,7 +51,34 @@ if Gst is not None:
         _provider.set_rank(Gst.Rank.NONE)
 
 
-__all__ = ['Player', 'gst_error']
+__all__ = ['Player', 'gst_error', 'audio_devices']
+
+
+_monitors = {}      # Linux: device class ('Audio/Sink', 'Audio/Source'): its Gst.DeviceMonitor, started once
+
+
+def audio_devices(kind):
+    """The Gst.Devices of kind ('Audio/Sink', 'Audio/Source') now. Linux: from one DeviceMonitor per kind, started
+    once and kept: PulseAudio's provider probed afresh leaked its context's memfd pool each time (one
+    memfd:pulseaudio for every DeviceMonitor.new() + get_devices(), never closed): probed every 2 s for the outputs
+    and the inputs, AG CuteMusic ran out of file descriptors in about 18 minutes and GLib aborted it (cannot create
+    wakeup pipe). Started, the provider keeps its one context and follows the devices plugged in and gone itself.
+    Elsewhere a fresh probe each time: a started monitor kept only what was there when it started on macOS (Core
+    Audio's provider watches no hot plugging)."""
+    if not sys.platform.startswith('linux'):
+        monitor = Gst.DeviceMonitor.new()
+        monitor.add_filter(kind, None)
+        return monitor.get_devices() or []
+    monitor = _monitors.get(kind)
+    if monitor is None:
+        monitor = Gst.DeviceMonitor.new()
+        monitor.add_filter(kind, None)
+        monitor.get_bus().set_flushing(True)        # its device-added / -removed messages: not read, not kept
+        if not monitor.start():
+            log.warning(f'[player] cannot watch the {kind} devices: probed each time')
+            return monitor.get_devices() or []
+        _monitors[kind] = monitor
+    return monitor.get_devices() or []
 
 
 AUDIO_SINKS = ('osxaudiosink', 'pulsesink', 'pipewiresink', 'alsasink', 'wasapi2sink', 'autoaudiosink')     # (wasapi2sink: Windows)
@@ -113,21 +140,110 @@ def _pulse_sink(device):
 _NUMBER_LIST = re.compile(r'\{\s*([^}]*)\}')
 
 
-def _doubles(structure, name):
-    try:
-        value = structure.get_value(name)
-        return [float(v) for v in value]
-    except Exception:
-        # a GValueArray or GstValueList PyGObject cannot convert ("unknown type"); from the structure's text instead
-        # (level's rms and peak: GValueArray <...> or (double){...}; spectrum's magnitude: a list, (float){...})
-        text = structure.to_string()
-        match = re.search(rf'\b{name}=\(GValueArray\)\s*<\s*([^>]*)>', text) or \
-                re.search(rf'\b{name}=\(\w+\)\s*\{{\s*([^}}]*)\}}', text) or \
-                re.search(rf'\b{name}=\(\w+\)\s*<\s*([^>]*)>', text)
-        if not match:
-            return []
+_players = []       # the Players made (the profiler's output diagnosis: output_diagnosis())
+
+
+def output_diagnosis():
+    """For the log ([profile]): the output sink's state, the clocks, what its last buffer held and when it was due.
+    A sink fed loud buffers yet silent: its clock not the pipeline's, or buffers out of time."""
+    import math
+    lines = []
+    for player in _players:
+        pipeline = player.pipeline
+        if pipeline is None:
+            continue
+        sink = None
+        top = pipeline.get_property('audio-sink')
+        candidates = [top]
+        if isinstance(top, Gst.Bin):
+            iterator = top.iterate_recurse()
+            while True:
+                result, element = iterator.next()
+                if result != Gst.IteratorResult.OK:
+                    break
+                candidates.append(element)
+        for element in candidates:
+            factory = element.get_factory() if element is not None else None
+            if factory is not None and factory.get_name() in ('pulsesink', 'pipewiresink', 'alsasink', 'osxaudiosink', 'wasapi2sink'):
+                sink = element
+                break
+        clock = pipeline.get_clock()
+        running = clock.get_time() - pipeline.get_base_time() if clock is not None else None
+        text = f'pipeline {pipeline.get_state(0)[1].value_nick}, clock {clock.get_name() if clock else None}'
+        if sink is None:
+            lines.append(text + ', no output sink found')
+            continue
+        own = sink.provide_clock() if hasattr(sink, 'provide_clock') else None
+        state = sink.get_state(0)
+        pending = f' (pending {state[2].value_nick})' if state[2] != Gst.State.VOID_PENDING else ''
+        same = " (the pipeline's)" if own is not None and own is clock else ''
+        used = sink.get_clock()
+        text += (f'; {sink.get_factory().get_name()} {sink.get_name()} {state[1].value_nick}{pending}, '
+                 f'its clock {own.get_name() if own else None}{same}, its element clock {used.get_name() if used else None}')
         try:
-            return [float(re.sub(r'\(\w+\)', '', v).strip()) for v in match.group(1).split(',') if v.strip()]
+            sink.set_property('enable-last-sample', True)
+            sample = sink.get_property('last-sample')
+        except Exception:
+            sample = None
+        if sample is not None:
+            buffer = sample.get_buffer()
+            caps = sample.get_caps()
+            data = buffer.extract_dup(0, buffer.get_size())
+            fmt = caps.get_structure(0).get_string('format') if caps is not None and caps.get_size() else None
+            rms = None
+            try:
+                import numpy
+                dtype = {'S16LE': numpy.int16, 'F32LE': numpy.float32, 'S32LE': numpy.int32}.get(fmt)
+                if dtype is not None:
+                    values = numpy.frombuffer(data, dtype=dtype).astype(numpy.float64)
+                    if dtype is numpy.int16:
+                        values /= 32768.0
+                    elif dtype is numpy.int32:
+                        values /= 2147483648.0
+                    rms = float(numpy.sqrt(numpy.mean(values ** 2))) if values.size else 0.0
+            except Exception:
+                pass
+            level = f'{20 * math.log10(rms):.1f} dBFS' if rms else ('silent' if rms == 0.0 else f'? ({fmt})')
+            segment = sample.get_segment()
+            stamp = segment.to_running_time(Gst.Format.TIME, buffer.pts) if segment is not None and buffer.pts != Gst.CLOCK_TIME_NONE else None
+            late = f', due {(stamp - running) / Gst.SECOND:+.2f} s from now' if stamp is not None and running is not None else ''
+            text += f'; its last buffer {level}{late}'
+        else:
+            text += '; no last buffer'
+        lines.append(text)
+    return lines
+
+
+_FROM_TEXT = set()      # the fields PyGObject could not convert: read from the structure's text at once
+
+
+def _doubles(structure, name):
+    if name not in _FROM_TEXT:
+        try:
+            value = structure.get_value(name)
+            return [float(v) for v in value]
+        except Exception:
+            _FROM_TEXT.add(name)        # (the exception each time costs as much as the reading)
+    # a GValueArray or GstValueList PyGObject cannot convert ("unknown type"); from the structure's text instead
+    # (level's rms and peak: GValueArray <...> or (double){...}; spectrum's magnitude: a list, (float){...})
+    text = structure.to_string()
+    at = text.find(f' {name}=(')
+    if at < 0:
+        return []
+    at = text.find(')', at) + 1
+    while at < len(text) and text[at] == ' ':
+        at += 1
+    if at >= len(text) or text[at] not in '{<':
+        return []
+    end = text.find('}' if text[at] == '{' else '>', at)
+    if end < 0:
+        return []
+    values = text[at + 1:end].split(',')
+    try:
+        return [float(v) for v in values if v.strip()]
+    except ValueError:          # typed values: (double)-20.5
+        try:
+            return [float(re.sub(r'\(\w+\)', '', v)) for v in values if v.strip()]
         except ValueError:
             return []
 
@@ -139,8 +255,8 @@ class Player(QObject):
 
     state_changed = pyqtSignal(str)
     position = pyqtSignal(float, float)
-    levels = pyqtSignal(list, list)
-    spectrum = pyqtSignal(list, int)
+    levels = pyqtSignal(object, object)     # (rms, peak dB lists) as objects: a list type is converted to a QVariantList and back for each slot
+    spectrum = pyqtSignal(object, int)      # (the 512 magnitudes: passed as they are, not converted for each slot)
     output_changed = pyqtSignal(str, str)       # (the output now, '' the default; why): plugged in, or gone
     outputs_changed = pyqtSignal()              # an output plugged in, or gone
     started = pyqtSignal(str)
@@ -168,6 +284,7 @@ class Player(QObject):
         if Gst is None:
             return
         self.pipeline = Gst.ElementFactory.make('playbin', 'player')
+        _players.append(self)       # (the profiler's output diagnosis)
         if self.pipeline is None:
             self.pipeline = None
             return
@@ -287,6 +404,19 @@ class Player(QObject):
         ok, rate = caps.get_structure(0).get_int('rate')
         return rate if ok else 0
 
+    spectrum_wanted = True
+
+    def set_spectrum_wanted(self, on):
+        """The spectrum analysed and posted only while a spectrum is on screen (the window's watch): its 512 bands
+        read 40 times a second for nothing otherwise."""
+        if on == self.spectrum_wanted or self._spectrum is None:
+            return
+        self.spectrum_wanted = on
+        self._spectrum.set_property('post-messages', on)
+        if not on:
+            self._spectra.clear()
+        log.info(f'[player] spectrum {"on: shown" if on else "off: none shown"}')
+
     def _clear_meters(self):
         self._levels.clear()
         self._spectra.clear()
@@ -297,12 +427,8 @@ class Player(QObject):
         """{name: Gst.Device} of the audio outputs (GStreamer's device providers: Core Audio, PulseAudio, PipeWire)."""
         if Gst is None:
             return {}
-        # a fresh probe each time, as _probe_outputs: a started monitor kept only what was there when it started on
-        # macOS (Core Audio's provider watches no hot plugging), a device plugged in since neither listed nor played
-        monitor = Gst.DeviceMonitor.new()
-        monitor.add_filter('Audio/Sink', None)
         devices = {}
-        for device in monitor.get_devices() or []:
+        for device in audio_devices('Audio/Sink'):
             name = device.get_display_name()
             if OWN_DEVICES.search(name):      # the mixer's own (link.py): not an output to play on
                 continue
@@ -319,10 +445,8 @@ class Player(QObject):
                          r'background music|webex|discord|ag cutemusic', re.IGNORECASE)
 
     def _probe_outputs(self):
-        """The output devices' names now (a fresh probe: every device provider, hot plugging or not)."""
-        monitor = Gst.DeviceMonitor.new()
-        monitor.add_filter('Audio/Sink', None)
-        names = {device.get_display_name() for device in monitor.get_devices() or []}
+        """The output devices' names now (audio_devices)."""
+        names = {device.get_display_name() for device in audio_devices('Audio/Sink')}
         return {name for name in names if not OWN_DEVICES.search(name)}     # the mixer's own: not unplugged
 
     def _watch_outputs(self):
@@ -568,7 +692,31 @@ class Player(QObject):
         shared = self._shared_volume
         where = (f'shared-sink amplification {shared.get_property("amplification"):.3f}' if shared is not None else
                  f'playbin volume {self.pipeline.get_property("volume"):.3f}, mute {self.pipeline.get_property("mute")}')
-        return f'{where}, sink {sink.get_name() if sink is not None else None}, {self.state}' 
+        return f'{where}, sink {sink.get_name() if sink is not None else None}, {self.state}{self._stream_state(sink)}'
+
+    @staticmethod
+    def _stream_state(sink):
+        """The output's own stream volume and mute (pulsesink's: as the sound server holds them, restored per app),
+        for the log: a stream left muted or at 0 there is silent whatever the amplification."""
+        found = None
+        if sink is not None:
+            if isinstance(sink, Gst.Bin):
+                iterator = sink.iterate_recurse()
+                while True:
+                    result, element = iterator.next()
+                    if result != Gst.IteratorResult.OK:
+                        break
+                    if element.get_factory() is not None and element.get_factory().get_name() == 'pulsesink':
+                        found = element
+                        break
+            elif sink.get_factory() is not None and sink.get_factory().get_name() == 'pulsesink':
+                found = sink
+        if found is None:
+            return ''
+        try:
+            return f'; stream volume {found.get_property("volume"):.3f}, mute {found.get_property("mute")}'
+        except Exception:
+            return ''
 
     def set_volume(self, value):
         """value 0..1, as heard (cubic, as the desktop's volume sliders)."""

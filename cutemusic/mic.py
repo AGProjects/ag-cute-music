@@ -90,7 +90,7 @@ def microphone_access(then):
 class Mic(QObject):
     """levels(rms dB per channel): the mic's, after its level."""
 
-    levels = pyqtSignal(list)
+    levels = pyqtSignal(object)     # (as an object: not converted to a QVariantList and back)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -151,12 +151,9 @@ class Mic(QObject):
         """{name: Gst.Device} of the audio inputs (not the outputs' monitors), PulseAudio's taken over PipeWire's."""
         if Gst is None:
             return {}
-        # a fresh probe each time: a started monitor kept only what was there when it started on macOS (Core Audio's
-        # provider watches no hot plugging), a mic plugged in since never listed (nor after the microphone permission)
-        monitor = Gst.DeviceMonitor.new()
-        monitor.add_filter('Audio/Source', None)
+        # (player.audio_devices: probed afresh on macOS, a mic plugged in since or the microphone permission given)
         devices = {}
-        found = monitor.get_devices() or []
+        found = _player.audio_devices('Audio/Source')
         for device in found:
             name = device.get_display_name()
             properties = device.get_properties()
@@ -462,9 +459,7 @@ class Mic(QObject):
         if self.output:
             device = None
             try:
-                monitor = Gst.DeviceMonitor.new()
-                monitor.add_filter('Audio/Sink', None)
-                device = next((d for d in monitor.get_devices() or [] if d.get_display_name() == self.output), None)
+                device = next((d for d in _player.audio_devices('Audio/Sink') if d.get_display_name() == self.output), None)
             except Exception as e:
                 log.warning(f'[mic] cannot list the outputs: {e}')
             if device is not None:

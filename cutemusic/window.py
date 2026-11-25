@@ -736,6 +736,9 @@ class MainWindow(QMainWindow):
         self.player.spectrum.connect(self.visuals.lava.set_spectrum)
         self.player.spectrum.connect(self.dock.vu.set_spectrum)
         self.player.spectrum.connect(self.dock.lava.set_spectrum)
+        self._screen_timer = QTimer(self, interval=500)        # what is on screen: only that computed and drawn
+        self._screen_timer.timeout.connect(self._watch_screen)
+        self._screen_timer.start()
         self.wheel_volume = WheelVolume(self.volume, [self.visuals.cover, self.visuals.vu_page, self.volume,
                                                       self.dock.cover, self.dock.vu, self.dock.lava], self)
         QApplication.instance().installEventFilter(self.wheel_volume)
@@ -2473,6 +2476,14 @@ class MainWindow(QMainWindow):
         if self.queue.move(1) is not None:
             self._play_current()
             self._follow_in_library()
+            return
+        # nothing after it in the queue (a track double-clicked: queued alone): the one after it in the library
+        track = self.queue.current
+        if track is not None:
+            following = (self.negatives_browser if self._is_negative(track) else self.browser).track_after(track)
+            if following is not None:
+                self._play_now([following])
+                self._follow_in_library()
 
     def previous(self):
         log.info(f'[ui] previous (at {self._position_seconds:.1f} s)')
@@ -2481,6 +2492,18 @@ class MainWindow(QMainWindow):
         elif self.queue.move(-1) is not None:
             self._play_current()
             self._follow_in_library()
+
+    def _watch_screen(self):
+        """Twice a second: the spectrum analysed only while one is on screen (the VU meters' spectrum style, the lava
+        lamps), the animated views woken when they are back on screen (un-minimized, uncovered: no showEvent then);
+        off screen they stop themselves."""
+        meters = (self.visuals.vu, self.visuals.amp.meter, self.dock.vu)
+        lamps = (self.visuals.lava, self.dock.lava)
+        self.player.set_spectrum_wanted(any(meter.style == 'spectrum' and util.on_screen(meter) for meter in meters) or
+                                        any(util.on_screen(lamp) for lamp in lamps))
+        for view in (self.visuals.vu, self.visuals.amp, self.dock.vu):       # (the lamps watch themselves)
+            view._wake()        # (at rest, paused: one tick, and stopped again)
+        self.visuals.mixer.wake()
 
     def _follow_in_library(self):
         """Next or Previous by hand: the selection in the library moves to the track now playing (its album opened,
@@ -3200,10 +3223,24 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, 'Rename marker', f'Cannot write the markers into {track.path}')
 
+    _tapes_back = None      # TAPES pressed: what the library showed before, for the next press
+
     def _show_recordings(self):
         """RECORDER's TAPE: the library shown with the recordings' genre ticked and the recording selected: the one
         recording now (once it is saved and scanned; till then its genre), else the last saved; neither, the genre
-        the next one goes to (Blink Calls during a call, else My Memos)."""
+        the next one goes to (Blink Calls during a call, else My Memos). Pressed again (the recordings still shown):
+        the library back as it was before, at the same place."""
+        browser = self.browser
+        back, self._tapes_back = self._tapes_back, None
+        if back is not None and browser.genres.selected == back['genres'] and self._library_shown() and \
+                self.tabs.currentWidget() is browser:
+            browser.restore_view_state(back['browser'])
+            self.tabs.setCurrentWidget(back['tab'])
+            if not back['library']:
+                self.set_library_shown(False)
+            log.info('[ui] TAPES again: the library as it was')
+            return
+        before = {'browser': browser.view_state(), 'tab': self.tabs.currentWidget(), 'library': self._library_shown()}
         recording = self._recording or self._recorded
         if recording is not None:
             path, genre = recording[0], recording[3]
@@ -3212,7 +3249,6 @@ class MainWindow(QMainWindow):
             path, genre = None, 'Blink Calls' if any(not call[2] for call in calls) else 'My Memos'
         self.set_library_shown(True)
         self.tabs.setCurrentWidget(self.browser)
-        browser = self.browser
         if browser.filter.text():
             browser.filter.clear()
         if not browser.genres.select_only(genre):
@@ -3222,6 +3258,7 @@ class MainWindow(QMainWindow):
             browser.clear_filters()
             browser.select_track(track)
         browser.tree.setFocus()
+        self._tapes_back = dict(before, genres=set(browser.genres.selected))
 
     def _stop_recording(self):
         """The recording finished, tagged, scanned into the Local Library."""

@@ -291,3 +291,13 @@ def self_executable():
         except (OSError, KeyError, ValueError):
             return None
     return sys.executable
+
+
+def on_screen(widget):
+    """Whether widget can be seen now: shown, not covered entirely, its window neither minimized nor unmapped. The
+    animated views draw and compute only then (a hidden or minimized view uses no CPU)."""
+    if not widget.isVisible() or widget.visibleRegion().isEmpty():
+        return False
+    window = widget.window()
+    handle = window.windowHandle()
+    return not window.isMinimized() and (handle is None or handle.isExposed())

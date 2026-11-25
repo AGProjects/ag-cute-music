@@ -402,6 +402,11 @@ with warnings.catch_warnings():
     except ImportError:
         audioop = None
 
+try:
+    import numpy        # (where there is no _feedio and no audioop: Linux and Windows on Python 3.13+)
+except ImportError:
+    numpy = None
+
 
 _c_lib = None
 
@@ -436,6 +441,11 @@ def _mix(parts):
         for part in parts[1:]:
             mixed = audioop.add(mixed, part, 2)
         return mixed
+    if numpy is not None:
+        total = numpy.frombuffer(parts[0], dtype=numpy.int16).astype(numpy.int32)
+        for part in parts[1:]:
+            total += numpy.frombuffer(part, dtype=numpy.int16)
+        return numpy.clip(total, -32768, 32767).astype(numpy.int16).tobytes()
     total = array.array('h', parts[0])
     for part in parts[1:]:
         other = array.array('h', part)
