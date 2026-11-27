@@ -32,6 +32,7 @@ import { MiniBar } from './src/MiniBar';
 import { LOCAL, loadLocal, localAvailable, sourceOf } from './src/local';
 import { SAVED, loadSaved, savedLibraries, savedLibrary } from './src/saved';
 import { HistoryView } from './src/HistoryView';
+import { ActionSheetHost } from './src/ActionSheet';
 import {
   QueuedTrack,
   registerLibrary,
@@ -312,11 +313,7 @@ function Main() {
               active={!picking}
             />
           ) : (
-            <Docked
-              onBrowse={() => setView('browser')}
-              onLibraries={() => setPicking(true)}
-              active={!picking}
-            />
+            <Docked onBrowse={() => setView('browser')} active={!picking} />
           )
         ) : (
           <>
@@ -349,6 +346,7 @@ function Main() {
           </ThemeContext.Provider>
         </SafeAreaProvider>
       </Modal>
+      <ActionSheetHost />
     </ThemeContext.Provider>
   );
 }
@@ -375,12 +373,15 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    marginRight: 6,
+    marginRight: 4,
     maxWidth: 170,
+    flexShrink: 1, // the library's name gives way: the tabs always fit
+    minWidth: 0,
   },
   sourceText: { fontSize: 13, marginHorizontal: 5, flexShrink: 1 },
   tab: {
-    paddingHorizontal: 12,
+    flexShrink: 0,
+    paddingHorizontal: 9,
     paddingVertical: 10,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',

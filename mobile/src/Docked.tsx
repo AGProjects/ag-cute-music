@@ -19,10 +19,10 @@ import { VUMeter, VUStyle, VU_STYLES } from './VUMeter';
 import { ui } from './log';
 
 export function useVUStyle(): [VUStyle, (style: VUStyle) => void] {
-  const [style, setStyle] = useState<VUStyle>('bars');
+  const [style, setStyle] = useState<VUStyle>('needles');
   useEffect(() => {
     settings
-      .get<VUStyle>('visuals/vu_style', 'bars')
+      .get<VUStyle>('visuals/vu_style', 'needles')
       .then(s => VU_STYLES.some(([k]) => k === s) && setStyle(s));
   }, []);
   return [
@@ -48,11 +48,9 @@ const DOTS = 16;
 
 export function Docked({
   onBrowse,
-  onLibraries,
   active,
 }: {
   onBrowse: () => void;
-  onLibraries: () => void;
   active: boolean;
 }) {
   const p = usePalette();
@@ -223,11 +221,7 @@ export function Docked({
           </>
         )}
       </View>
-      <Transport
-        left={['browse', 'Browser', onBrowse]}
-        right={['lan', 'Libraries', onLibraries]}
-        output
-      />
+      <Transport left={['browse', 'Browser', onBrowse]} output />
     </View>
   );
 }

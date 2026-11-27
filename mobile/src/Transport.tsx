@@ -124,7 +124,7 @@ export function Transport({
               color={p.visualDim}
             />
           ) : (
-            <View style={styles.side} />
+            !output && <View style={styles.side} />
           )}
         </View>
       </View>

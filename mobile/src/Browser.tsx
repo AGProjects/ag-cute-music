@@ -1,10 +1,8 @@
 // The library: by Year, Artist, Album or Folder, the desktop's tree (a group opened in place, the others still
-// there), with a filter, the genres and the color markers. A song: its group played from it; long press: Play, Play next, Add to queue.
+// there), with a filter, the genres and the color markers. A song: its group played from it; long press: Play, Play next, Add to queue, Save to or Remove from this phone.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActionSheetIOS,
-  Alert,
   FlatList,
   Platform,
   Pressable,
@@ -31,6 +29,7 @@ import { MARKERS, usePalette } from './theme';
 import { Dots, IconButton, Segmented } from './ui';
 import { Icon } from './icons';
 import { ui } from './log';
+import { showActions } from './ActionSheet';
 import {
   removeSaved,
   savedCount,
@@ -40,28 +39,10 @@ import {
 } from './saved';
 
 function actions(title: string, choices: [string, () => void][]) {
-  if (Platform.OS === 'ios') {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title,
-        options: [...choices.map(([label]) => label), 'Cancel'],
-        cancelButtonIndex: choices.length,
-      },
-      index => index < choices.length && choices[index][1](),
-    );
-  } else {
-    Alert.alert(
-      title,
-      undefined,
-      [
-        ...choices.map(([text, onPress]) => ({ text, onPress })),
-        { text: 'Cancel', style: 'cancel' as const },
-      ],
-      {
-        cancelable: true,
-      },
-    );
-  }
+  showActions(
+    title,
+    choices.map(([text, onPress]) => ({ text, onPress })),
+  );
 }
 
 type Row = { node: Node; depth: number; id: string; open: boolean };

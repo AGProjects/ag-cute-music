@@ -1,14 +1,7 @@
 // The queue: what plays, in order; tap: play from there; long press: Remove, Play next, Clear the rest.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import TrackPlayer, {
   Event,
   useActiveTrack,
@@ -18,6 +11,7 @@ import TrackPlayer, {
 import { QueuedTrack } from './player';
 import { formatDuration } from './protocol';
 import { usePalette } from './theme';
+import { showActions } from './ActionSheet';
 import { ui } from './log';
 
 export function QueueView() {
@@ -38,39 +32,42 @@ export function QueueView() {
   );
 
   const menu = (index: number, track: QueuedTrack) =>
-    Alert.alert(track.title || '', track.artist, [
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => {
-          ui('queue remove', index);
-          TrackPlayer.remove(index).then(refresh);
+    showActions(
+      track.title || '',
+      [
+        {
+          text: 'Remove',
+          destructive: true,
+          onPress: () => {
+            ui('queue remove', index);
+            TrackPlayer.remove(index).then(refresh);
+          },
         },
-      },
-      ...(current !== undefined && index > current + 1
-        ? [
-            {
-              text: 'Play next',
-              onPress: () => {
-                ui('queue play next', index);
-                TrackPlayer.move(index, current + 1).then(refresh);
+        ...(current !== undefined && index > current + 1
+          ? [
+              {
+                text: 'Play next',
+                onPress: () => {
+                  ui('queue play next', index);
+                  TrackPlayer.move(index, current + 1).then(refresh);
+                },
               },
-            },
-          ]
-        : []),
-      ...(current !== undefined
-        ? [
-            {
-              text: 'Clear what comes after',
-              onPress: () => {
-                ui('queue clear after', current);
-                TrackPlayer.removeUpcomingTracks().then(refresh);
+            ]
+          : []),
+        ...(current !== undefined
+          ? [
+              {
+                text: 'Clear what comes after',
+                onPress: () => {
+                  ui('queue clear after', current);
+                  TrackPlayer.removeUpcomingTracks().then(refresh);
+                },
               },
-            },
-          ]
-        : []),
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+            ]
+          : []),
+      ],
+      track.artist,
+    );
 
   return (
     <FlatList

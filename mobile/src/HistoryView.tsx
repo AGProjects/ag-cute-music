@@ -2,18 +2,12 @@
 // Add to queue, Remove from the history.
 
 import React from 'react';
-import {
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ui } from './log';
 import { enqueueItems, forgetPlayed, playItems, useHistory } from './player';
 import { usePalette } from './theme';
+import { showActions } from './ActionSheet';
 
 function when(at: number) {
   const date = new Date(at);
@@ -54,25 +48,28 @@ export function HistoryView() {
             playItems([item.track]);
           }}
           onLongPress={() =>
-            Alert.alert(item.track.title || '', item.track.artist, [
-              {
-                text: 'Play next',
-                onPress: () => enqueueItems([item.track], true),
-              },
-              {
-                text: 'Add to queue',
-                onPress: () => enqueueItems([item.track], false),
-              },
-              {
-                text: 'Remove from the history',
-                style: 'destructive',
-                onPress: () => {
-                  ui('history remove', item.track.title);
-                  forgetPlayed(item.at);
+            showActions(
+              item.track.title || '',
+              [
+                {
+                  text: 'Play next',
+                  onPress: () => enqueueItems([item.track], true),
                 },
-              },
-              { text: 'Cancel', style: 'cancel' },
-            ])
+                {
+                  text: 'Add to queue',
+                  onPress: () => enqueueItems([item.track], false),
+                },
+                {
+                  text: 'Remove from the history',
+                  destructive: true,
+                  onPress: () => {
+                    ui('history remove', item.track.title);
+                    forgetPlayed(item.at);
+                  },
+                },
+              ],
+              item.track.artist,
+            )
           }
           style={({ pressed }) => [
             styles.row,
