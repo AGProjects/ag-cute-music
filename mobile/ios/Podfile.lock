@@ -1,4 +1,27 @@
 PODS:
+  - ag-audio-output (0.1.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-cxxstableapi
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - AsyncStorage (3.1.1):
     - hermes-engine
     - RCTRequired
@@ -1963,6 +1986,7 @@ PODS:
     - React-Core-prebuilt
 
 DEPENDENCIES:
+  - ag-audio-output (from `../node_modules/ag-audio-output`)
   - "AsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
   - boost (from `build/rndeps-facades/boost`)
   - DoubleConversion (from `build/rndeps-facades/DoubleConversion`)
@@ -2062,6 +2086,8 @@ SPEC REPOS:
     - SwiftAudioEx
 
 EXTERNAL SOURCES:
+  ag-audio-output:
+    :path: "../node_modules/ag-audio-output"
   AsyncStorage:
     :path: "../node_modules/@react-native-async-storage/async-storage"
   boost:
@@ -2249,6 +2275,7 @@ EXTERNAL SOURCES:
     :path: build/rncore-facades/Yoga
 
 SPEC CHECKSUMS:
+  ag-audio-output: cc28a670cae458ea76c47bf0ec39e10941b40f64
   AsyncStorage: d6deeca6c42d671c57f78abf400aad622f13bb75
   boost: 8502bfdc46e2804408af2e163049ece181009af4
   DoubleConversion: 501a575c40c0b50c89685762dd3e415e6bb26fb0
@@ -2345,4 +2372,4 @@ SPEC CHECKSUMS:
 
 PODFILE CHECKSUM: 83670585d3839cb8d7adf39726a730d44325cb9a
 
-COCOAPODS: 1.15.2
+COCOAPODS: 1.16.2
