@@ -28,6 +28,13 @@ import { Saved, settings } from './settings';
 import { ThemeName, usePalette } from './theme';
 import { IconButton, Segmented } from './ui';
 import { ui } from './log';
+import {
+  SAVED,
+  removeSaved,
+  savedLibraries,
+  savedLibrary,
+  useSaved,
+} from './saved';
 
 const THEMES: [ThemeName, string][] = [
   ['system', 'Follow system'],
@@ -61,6 +68,8 @@ export function Libraries({
   const [text, setText] = useState('');
   const [counts, setCounts] = useState<Record<Source, number> | null>(null);
   const [allowed, setAllowed] = useState(true);
+  useSaved(); // (re-rendered as songs are saved or removed)
+  const saved = savedLibraries();
   const refreshCounts = async () => {
     const ok = await permitted(false);
     setAllowed(ok);
@@ -194,6 +203,43 @@ export function Libraries({
                   currentId === sourceAddress(source),
                 ),
               )
+            )}
+          </>
+        )}
+        {/* songs of LAN libraries saved on the phone: there away from home */}
+        {saved.length > 0 && (
+          <>
+            <Text style={[styles.section, { color: p.dim }]}>
+              SAVED ON THIS PHONE
+            </Text>
+            {saved.map(c =>
+              row(
+                `saved:${c.id}`,
+                c.name,
+                `${c.count} songs`,
+                () => {
+                  ui('library', `saved ${c.name}`);
+                  onChoose({
+                    id: `${SAVED}:${c.id}`,
+                    name: c.name,
+                    address: `${SAVED}:${c.id}`,
+                  });
+                },
+                currentId === `${SAVED}:${c.id}`,
+                () =>
+                  Alert.alert(c.name, `${c.count} songs saved on this phone`, [
+                    {
+                      text: 'Remove them all from this phone',
+                      style: 'destructive',
+                      onPress: () =>
+                        removeSaved(
+                          c.id,
+                          savedLibrary(`${SAVED}:${c.id}`).tracks,
+                        ),
+                    },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]),
+              ),
             )}
           </>
         )}

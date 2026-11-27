@@ -8,6 +8,7 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 
 import { isLocal, localLevels } from './local';
+import { savedEntry, savedLevels } from './saved';
 import { QueuedTrack, libraryOf } from './player';
 
 export type Levels = {
@@ -63,8 +64,12 @@ export function fetchLevels(track: QueuedTrack): Promise<Levels | null> {
       return Promise.resolve(null);
     }
     const started = Date.now();
+    const savedFrom =
+      library.kind === 'saved' ? library.savedFrom! : library.id;
     found = isLocal(library)
       ? localLevels(track.source).then(toLevels)
+      : savedEntry(savedFrom, track.rel) || library.kind === 'saved'
+      ? savedLevels(savedFrom, track.rel).then(toLevels)
       : library && library.endpoints.includes('levels')
       ? fetch(`${library.address}/levels?path=${encodeURIComponent(track.rel)}`)
           .then(r => (r.ok ? r.json() : null))

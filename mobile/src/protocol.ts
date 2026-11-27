@@ -9,6 +9,7 @@
 import { Platform } from 'react-native';
 
 import { isLocal, localLyrics, localUrl } from './local';
+import { savedCover, savedEntry, savedLyrics, savedUrl } from './saved';
 
 export const SERVICE_TYPE = 'agcutemusic'; // _agcutemusic._tcp
 export const PORT = 47100;
@@ -37,8 +38,13 @@ export type Library = {
   address: string; // http://host:port
   endpoints: string[];
   tracks: Track[];
-  kind?: 'remote' | 'local'; // a library on the LAN (the default), or the phone's own (local.ts)
+  kind?: 'remote' | 'local' | 'saved'; // on the LAN (the default), the phone's own (local.ts), or saved from a LAN one (saved.ts)
+  savedFrom?: string; // a saved library: the id of the LAN library its songs come from
 };
+
+// The id under which a library's songs are saved on the phone (saved.ts): its own, or the one it was saved from
+const savedId = (library: Library) =>
+  library.kind === 'saved' ? library.savedFrom! : library.id;
 
 export const albumArtist = (t: Track) =>
   t.albumartist || t.artist || 'Unknown artist';
@@ -171,6 +177,11 @@ export function fileUrl(library: Library, rel: string): string {
     const track = trackOf(library, rel);
     return track ? localUrl(track) : '';
   }
+  // saved on the phone: played from there (the saved library's songs, and a LAN library's saved ones)
+  const saved = savedUrl(savedId(library), rel);
+  if (saved || library.kind === 'saved') {
+    return saved || '';
+  }
   if (library.endpoints.includes('file/')) {
     return `${library.address}/file/${rel
       .split('/')
@@ -181,9 +192,10 @@ export function fileUrl(library: Library, rel: string): string {
 }
 
 export const coverUrl = (library: Library, rel: string) =>
-  library.endpoints.includes('cover')
+  savedCover(savedId(library), rel) ||
+  (library.endpoints.includes('cover')
     ? query(library.address, 'cover', rel)
-    : null;
+    : null);
 
 export async function extras(library: Library, rel: string): Promise<string[]> {
   try {
@@ -233,6 +245,9 @@ export async function lyrics(
   if (isLocal(library)) {
     const track = trackOf(library, rel);
     return track ? localLyrics(track) : null;
+  }
+  if (savedEntry(savedId(library), rel) || library.kind === 'saved') {
+    return savedLyrics(savedId(library), rel);
   }
   if (library.endpoints.includes('lyrics')) {
     try {

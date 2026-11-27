@@ -23,6 +23,7 @@ export type IconName =
   | 'browse'
   | 'meter'
   | 'speaker'
+  | 'saved'
   | 'bars'
   | 'needles'
   | 'leds'
@@ -127,6 +128,7 @@ export function Icon({
         {...stroke}
       />
     ),
+    saved: <Path d="M12 4v11M7 10l5 5 5-5M5 20h14" {...stroke} />,
     speaker: (
       <>
         <Rect x="5" y="3" width="14" height="18" rx="2" {...stroke} />

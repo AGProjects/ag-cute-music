@@ -41,7 +41,9 @@ export function Cover({
       if (direct) {
         setUri(direct);
       } else {
-        folderCover(library, rel).then(found => live && setUri(found));
+        if (library.kind !== 'saved') {
+          folderCover(library, rel).then(found => live && setUri(found));
+        }
       }
     }
     return () => {

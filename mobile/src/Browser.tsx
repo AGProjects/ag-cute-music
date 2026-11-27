@@ -18,6 +18,7 @@ import {
 import {
   Mode,
   MODES,
+  UNKNOWN_GENRE,
   Node,
   buildTree,
   filterTracks,
@@ -30,6 +31,13 @@ import { MARKERS, usePalette } from './theme';
 import { Dots, IconButton, Segmented } from './ui';
 import { Icon } from './icons';
 import { ui } from './log';
+import {
+  removeSaved,
+  savedCount,
+  saveTracks,
+  stopSaving,
+  useSaved,
+} from './saved';
 
 function actions(title: string, choices: [string, () => void][]) {
   if (Platform.OS === 'ios') {
@@ -72,6 +80,13 @@ export function Browser({
   const [colors, setColors] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showGenres, setShowGenres] = useState(false);
+  const saving = useSaved(); // (re-rendered as songs are saved)
+  // 2: all of a song or group saved, 1: some, 0: none
+  const savedMark = (node: Node) => {
+    const tracks = node.track ? [node.track] : node.tracks;
+    const n = savedCount(library.id, tracks);
+    return n === 0 ? 0 : n === tracks.length ? 2 : 1;
+  };
 
   useEffect(() => {
     settings
@@ -133,6 +148,43 @@ export function Browser({
       ['Play', () => playTracks(library, tracks, 0)],
       ['Play next', () => enqueue(library, tracks, true)],
       ['Add to queue', () => enqueue(library, tracks, false)],
+      ...keepMenu(tracks),
+    ]);
+  };
+
+  // a LAN library's songs saved on the phone (saved.ts), or taken off it again
+  const saveId = library.kind === 'saved' ? library.savedFrom! : library.id;
+  const keepMenu = (tracks: Track[]): [string, () => void][] => {
+    if (library.kind === 'local') {
+      return [];
+    }
+    const saved = savedCount(saveId, tracks);
+    const choices: [string, () => void][] = [];
+    if (library.kind !== 'saved' && saved < tracks.length) {
+      choices.push([
+        `Save to this phone (${tracks.length - saved})`,
+        () => saveTracks(library, tracks),
+      ]);
+    }
+    if (saved > 0) {
+      choices.push([
+        `Remove from this phone (${saved})`,
+        () => removeSaved(saveId, tracks),
+      ]);
+    }
+    return choices;
+  };
+  const genreMenu = (genre: string) => {
+    const tracks = library.tracks.filter(t =>
+      (t.genres.length ? t.genres : [UNKNOWN_GENRE]).some(
+        g => g.toLowerCase() === genre.toLowerCase(),
+      ),
+    );
+    ui('menu', `genre ${genre}`);
+    actions(genre, [
+      ['Play', () => playTracks(library, tracks, 0)],
+      ['Add to queue', () => enqueue(library, tracks, false)],
+      ...keepMenu(tracks),
     ]);
   };
 
@@ -210,6 +262,18 @@ export function Browser({
           {item.name}
         </Text>
         <Dots colors={item.colors} />
+        {/* saved on the phone: all of it (a full mark) or some (an outline) */}
+        {library.kind !== 'local' &&
+          library.kind !== 'saved' &&
+          savedMark(item) > 0 && (
+            <View style={styles.savedMark}>
+              <Icon
+                name="saved"
+                size={13}
+                color={savedMark(item) === 2 ? p.accent : p.dim}
+              />
+            </View>
+          )}
         <Text style={[styles.detail, { color: p.dim }]}>{item.detail}</Text>
         {item.children ? (
           <>
@@ -332,6 +396,7 @@ export function Browser({
                   ui('genre', g);
                   toggle(genres, g, setGenres);
                 }}
+                onLongPress={() => genreMenu(g)}
                 style={[
                   styles.chip,
                   {
@@ -352,6 +417,25 @@ export function Browser({
             );
           })}
         </ScrollView>
+      )}
+      {/* saving songs to the phone: how far, and a stop */}
+      {saving.total > 0 && (
+        <View
+          style={[
+            styles.saving,
+            { backgroundColor: p.alternate, borderBottomColor: p.line },
+          ]}
+        >
+          <Text numberOfLines={1} style={[styles.count, { color: p.text }]}>
+            Saving {saving.done + 1} / {saving.total} · {saving.title}
+          </Text>
+          <IconButton
+            name="close"
+            size={16}
+            onPress={stopSaving}
+            label="Stop saving"
+          />
+        </View>
       )}
       {/* the songs shown (all, or those the filter leaves): played, shuffled */}
       <View style={[styles.crumbs, { borderBottomColor: p.line }]}>
@@ -442,6 +526,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   name: { flex: 1, fontSize: 15 },
+  savedMark: { marginLeft: 6 },
+  saving: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   groupPlay: {
     marginLeft: 10,
     marginRight: 6,

@@ -30,6 +30,7 @@ import { useDiscovery } from './src/discovery';
 import { Libraries } from './src/Libraries';
 import { MiniBar } from './src/MiniBar';
 import { LOCAL, loadLocal, localAvailable, sourceOf } from './src/local';
+import { SAVED, loadSaved, savedLibraries, savedLibrary } from './src/saved';
 import { HistoryView } from './src/HistoryView';
 import {
   QueuedTrack,
@@ -89,7 +90,8 @@ function Main() {
     quiet = false,
   ): Promise<void> {
     const local = sourceOf(saved.address) !== null; // this phone's music, or one of its other sources
-    if (!local) {
+    const kept = saved.address.startsWith(`${SAVED}:`); // songs of a LAN library saved on the phone
+    if (!local && !kept) {
       tried.current.add(saved.address);
     }
     setConnecting(saved.address);
@@ -97,6 +99,8 @@ function Main() {
     try {
       const loaded = local
         ? await loadLocal(saved.address)
+        : kept
+        ? (await loadSaved(), savedLibrary(saved.address))
         : await fetchLibrary(saved.address);
       registerLibrary(loaded);
       setLibrary(loaded);
@@ -116,7 +120,23 @@ function Main() {
           }`,
         );
       }
-      if (quiet && !local && localAvailable) {
+      if (quiet && !local && !kept && saved.id) {
+        // away from home: what was saved from it, when there is some
+        await loadSaved();
+        if (savedLibraries().some(c => c.id === saved.id)) {
+          setConnecting(undefined);
+          connect(
+            {
+              id: `${SAVED}:${saved.id}`,
+              name: saved.name,
+              address: `${SAVED}:${saved.id}`,
+            },
+            true,
+          );
+          return;
+        }
+      }
+      if (quiet && !local && !kept && localAvailable) {
         // the LAN library used last is not there (away from home): the phone's own music meanwhile
         setConnecting(undefined);
         connect({ id: LOCAL, name: 'This phone', address: LOCAL }, true);
