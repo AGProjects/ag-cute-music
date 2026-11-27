@@ -13,6 +13,7 @@ import {
 import { IconName } from './icons';
 import { QueuedTrack, next, previous, seek, togglePlay } from './player';
 import { formatDuration } from './protocol';
+import { OutputButton } from './OutputButton';
 import { usePalette } from './theme';
 import { IconButton } from './ui';
 
@@ -20,10 +21,12 @@ export function Transport({
   left,
   right,
   titles = true,
+  output = false,
 }: {
   left?: [IconName, string, () => void];
   right?: [IconName, string, () => void];
   titles?: boolean;
+  output?: boolean; // the OUTPUT button beside the right one
 }) {
   const p = usePalette();
   const track = useActiveTrack() as QueuedTrack | undefined;
@@ -111,16 +114,19 @@ export function Transport({
             label="Next"
           />
         </View>
-        {right ? (
-          <IconButton
-            name={right[0]}
-            label={right[1]}
-            onPress={right[2]}
-            color={p.visualDim}
-          />
-        ) : (
-          <View style={styles.side} />
-        )}
+        <View style={styles.ends}>
+          {output && <OutputButton color={p.visualDim} />}
+          {right ? (
+            <IconButton
+              name={right[0]}
+              label={right[1]}
+              onPress={right[2]}
+              color={p.visualDim}
+            />
+          ) : (
+            <View style={styles.side} />
+          )}
+        </View>
       </View>
     </View>
   );
@@ -144,4 +150,5 @@ const styles = StyleSheet.create({
   },
   middle: { flexDirection: 'row', alignItems: 'center' },
   side: { width: 34 },
+  ends: { flexDirection: 'row', alignItems: 'center' },
 });

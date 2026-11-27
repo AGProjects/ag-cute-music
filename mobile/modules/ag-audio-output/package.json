@@ -1,0 +1,8 @@
+{
+  "name": "ag-audio-output",
+  "version": "0.1.0",
+  "description": "AG CuteMusic's output picker on iOS: AVRoutePickerView and the current route's name (Android: android/app/.../AudioOutput.kt)",
+  "main": "index.js",
+  "license": "GPL-3.0-or-later",
+  "private": true
+}

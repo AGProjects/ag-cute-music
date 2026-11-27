@@ -22,6 +22,7 @@ export type IconName =
   | 'lyrics'
   | 'browse'
   | 'meter'
+  | 'speaker'
   | 'bars'
   | 'needles'
   | 'leds'
@@ -125,6 +126,13 @@ export function Icon({
         d="M4 5h6M4 10h6M4 15h6M4 20h6M14 5v15M14 5l6 2.5v4L14 9"
         {...stroke}
       />
+    ),
+    speaker: (
+      <>
+        <Rect x="5" y="3" width="14" height="18" rx="2" {...stroke} />
+        <Circle cx="12" cy="14" r="3.2" {...stroke} />
+        <Circle cx="12" cy="7.5" r="1.1" fill={color} />
+      </>
     ),
     meter: (
       <>

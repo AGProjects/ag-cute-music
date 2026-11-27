@@ -226,6 +226,7 @@ export function Docked({
       <Transport
         left={['browse', 'Browser', onBrowse]}
         right={['lan', 'Libraries', onLibraries]}
+        output
       />
     </View>
   );

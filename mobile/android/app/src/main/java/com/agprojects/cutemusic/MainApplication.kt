@@ -16,6 +16,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(MediaLibraryPackage())      // the phone's own music (MediaLibrary.kt)
           add(SystemBarsPackage())        // full screen in landscape (SystemBars.kt)
+          add(AudioOutputPackage())       // where the music plays (AudioOutput.kt)
         },
     )
   }

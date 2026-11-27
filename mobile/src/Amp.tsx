@@ -36,6 +36,8 @@ import { useLiveLevels } from './levels';
 import { useMeter } from './meter';
 import { Icon, IconName } from './icons';
 import { QueuedTrack, next, previous, seek, togglePlay } from './player';
+import { useOutputName } from './output';
+import { OutputButton } from './OutputButton';
 import { formatDuration } from './protocol';
 import { LyricsStrip } from './LyricsStrip';
 import { settings } from './settings';
@@ -654,6 +656,7 @@ export function Amp({
   const [area, setArea] = useState({ width: 0, height: 0 });
   const [below, setBelow] = useState(80);
   const { playing } = useIsPlaying();
+  const outputName = useOutputName();
   // landscape is full screen: the status bar and Android's buttons hidden as long as the amplifier is shown
   // (SystemBars.kt; a swipe from the edge shows them for a moment), back in portrait
   useEffect(() => {
@@ -935,6 +938,24 @@ export function Amp({
               label="Next"
               onPress={next}
             />
+            {/* OUTPUT, at the row's right end, the output's name beside it */}
+            <View style={[styles.output, { height: row }]}>
+              {!!outputName && (
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.outputName,
+                    { color: p.visualDim, fontSize: Math.max(11, row * 0.22) },
+                  ]}
+                >
+                  {outputName}
+                </Text>
+              )}
+              <OutputButton
+                size={Math.max(18, row * 0.36)}
+                color={p.visualDim}
+              />
+            </View>
           </View>
         )}
       </View>
@@ -946,6 +967,15 @@ export function Amp({
 }
 
 const styles = StyleSheet.create({
+  output: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: '30%',
+  },
+  outputName: { marginRight: 4, flexShrink: 1 },
   view: { flex: 1 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   window: {
