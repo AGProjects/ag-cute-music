@@ -6,7 +6,12 @@ artists, albums or songs into their own music folder.
     GET /info                   {name, id, app, version, tracks}
     GET /library                {name, id, tracks: [{tags..., path: relative to the music folder}]}
     GET /file?path=<relative>   a music file (or its .lrc/.txt, or an image of its folder); ranges served
+    GET /file/<relative>        the same, the path in the URL (players that go by the URL's extension: AVPlayer)
     GET /extras?path=<relative> the .lrc/.txt of the same name and the images in its folder: [relative paths]
+    GET /cover?path=<relative>  a song's cover as the player shows it (in the file, next to it, online, else the
+                                artist's picture): the image; 404 when none (for the mobile app, which has no tags)
+    GET /lyrics?path=<relative> a song's lyrics as the player reads them (.lrc/.txt, in the tags, online): text/plain
+    GET /levels?path=<relative> a song's levels and spectrum, worked out ahead (levels.py): the app's VU meter
   Only files under the music folder, of those kinds. No password: for a trusted LAN.
 - Discovery: the shared libraries found on the LAN (python3-zeroconf; without it, File -> Connect to a library...
   by address only).
@@ -47,6 +52,12 @@ SIDECARS = ('.lrc', '.LRC', '.txt')
 SERVED = AUDIO_EXTENSIONS | set(IMAGE_EXTENSIONS) | {'.lrc', '.txt'}
 TIMEOUT = 20
 CHUNK = 256 * 1024
+ENDPOINTS = ['info', 'library', 'file', 'file/', 'extras', 'cover', 'lyrics', 'levels']     # /info tells them (the mobile app)
+TYPES = {'.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
+         '.m4a': 'audio/mp4', '.mp4': 'audio/mp4', '.aac': 'audio/aac', '.alac': 'audio/mp4', '.wav': 'audio/wav',
+         '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.wma': 'audio/x-ms-wma', '.jpg': 'image/jpeg',
+         '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp',
+         '.lrc': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8'}
 
 
 def library_id():
@@ -97,11 +108,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlsplit(self.path)
         query = urllib.parse.parse_qs(url.query)
         relative = (query.get('path') or [''])[0]
+        if url.path.startswith('/file/'):
+            url, relative = url._replace(path='/file'), urllib.parse.unquote(url.path[len('/file/'):])
         library = self.server.library
         try:
             if url.path == '/info':
                 self._json({'name': library.name, 'id': library.id, 'app': APP_NAME, 'version': __version__,
-                            'tracks': len(library.tracks)})
+                            'tracks': len(library.tracks), 'endpoints': ENDPOINTS})
             elif url.path == '/library':
                 self._json({'name': library.name, 'id': library.id, 'tracks': library.shared_tracks()})
             elif url.path == '/extras':
@@ -110,6 +123,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self.send_error(404)
                     return
                 self._json(library.extras(path))
+            elif url.path == '/levels':
+                path = self._local(relative)
+                from cutemusic.levels import levels
+                data = levels(path) if path is not None and os.path.splitext(path)[1].lower() in AUDIO_EXTENSIONS else None
+                if data is None:
+                    self.send_error(404)
+                    return
+                self._bytes(data, 'application/json')
+            elif url.path in ('/cover', '/lyrics'):
+                path = self._local(relative)
+                if path is None or os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+                    self.send_error(404)
+                    return
+                if url.path == '/cover':
+                    self._cover(library.track(path))
+                else:
+                    self._lyrics(library.track(path))
             elif url.path == '/file':
                 path = self._local(relative)
                 if path is None:
@@ -120,6 +150,38 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _bytes(self, body, kind):
+        self.send_response(200)
+        self.send_header('Content-Type', kind)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'max-age=3600')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _cover(self, track):
+        from cutemusic.library import read_artist_image, read_cover
+        data, path = read_cover(track)
+        path = path or (None if data else read_artist_image(track))
+        if data is None and path:
+            try:
+                with open(path, 'rb') as f:
+                    data = f.read()
+            except OSError:
+                data = None
+        if not data:
+            self.send_error(404)
+            return
+        kind = 'image/png' if data[:8] == b'\x89PNG\r\n\x1a\n' else 'image/webp' if data[8:12] == b'WEBP' else 'image/jpeg'
+        self._bytes(data, kind)
+
+    def _lyrics(self, track):
+        from cutemusic.library import read_lyrics
+        text = read_lyrics(track)
+        if not text:
+            self.send_error(404)
+            return
+        self._bytes(text.encode('utf-8'), 'text/plain; charset=utf-8')
 
     def _file(self, path):
         size = os.path.getsize(path)
@@ -142,7 +204,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
         else:
             self.send_response(200)
-        self.send_header('Content-Type', 'application/octet-stream')
+        self.send_header('Content-Type', TYPES.get(os.path.splitext(path)[1].lower(), 'application/octet-stream'))
         self.send_header('Accept-Ranges', 'bytes')
         self.send_header('Content-Length', str(end - start + 1))
         self.end_headers()
@@ -184,10 +246,18 @@ class LibraryServer(object):
         self._info = None
         self._lock = threading.Lock()
         self._shared = None
+        self._by_path = None
 
     def set_library(self, tracks, root):
         with self._lock:
-            self.tracks, self.root, self._shared = list(tracks), root, None
+            self.tracks, self.root, self._shared, self._by_path = list(tracks), root, None, None
+
+    def track(self, path):
+        """The library's Track of path (its tags, for what is looked up online), else one with the path alone."""
+        with self._lock:
+            if self._by_path is None:
+                self._by_path = {os.path.realpath(track.path): track for track in self.tracks}
+            return self._by_path.get(path) or Track(path=path)
 
     def shared_tracks(self):
         with self._lock:
@@ -260,24 +330,41 @@ class LibraryServer(object):
             log.info('[sharing] stopped')
 
 
+VIRTUAL = ('lxc', 'lxd', 'docker', 'br-', 'virbr', 'veth', 'vnet', 'vmnet', 'vboxnet', 'tun', 'tap', 'wg', 'zt', 'tailscale',
+           'utun', 'awdl', 'llw', 'bridge', 'anpi')     # containers, VMs, VPNs: not where the LAN reaches us
+
+
+def _primary():
+    """The address the default route leaves from (nothing is sent): the LAN's, as a rule."""
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(('10.255.255.255', 1))
+        address = probe.getsockname()[0]
+        probe.close()
+        return address
+    except OSError:
+        return None
+
+
 def _addresses():
-    """This computer's IPv4 addresses on the LAN (not loopback)."""
-    found = set()
+    """This computer's IPv4 addresses on the LAN: the default route's first (the others find it there), then those of
+    the other real interfaces; not loopback, link-local, nor the bridges of containers and VMs (LXC's 10.0.3.1)."""
+    primary = _primary()
+    found = []
     try:
         import ifaddr
         for adapter in ifaddr.get_adapters():
+            name = (adapter.nice_name or adapter.name or '').lower()
+            if name.startswith(VIRTUAL):
+                continue
             for ip in adapter.ips:
-                if isinstance(ip.ip, str) and not ip.ip.startswith('127.') and not ip.ip.startswith('169.254.'):
-                    found.add(ip.ip)
+                if isinstance(ip.ip, str) and not ip.ip.startswith(('127.', '169.254.')) and ip.ip not in found:
+                    found.append(ip.ip)
     except ImportError:
-        try:
-            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            probe.connect(('10.255.255.255', 1))
-            found.add(probe.getsockname()[0])
-            probe.close()
-        except OSError:
-            pass
-    return sorted(found)
+        pass
+    if primary and not primary.startswith('127.'):
+        found = [primary] + [address for address in found if address != primary]
+    return found
 
 
 # Finding
